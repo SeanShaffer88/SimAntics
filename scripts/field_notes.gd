@@ -26,6 +26,15 @@ func has_noted(key: String) -> bool:
 	return _seen.has(key)
 
 
+## How many once-only notes start with `prefix` (e.g. behaviours the player has seen).
+func count_prefix(prefix: String) -> int:
+	var n := 0
+	for key: String in _seen:
+		if key.begins_with(prefix):
+			n += 1
+	return n
+
+
 ## The most recent `count` entries, newest first.
 func recent(count: int) -> Array:
 	var out := []

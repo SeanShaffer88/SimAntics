@@ -230,7 +230,10 @@ func _build_ambiance() -> void:
 	add_child(observer)
 	move_child(observer, _ants.get_index() + 1)
 	observer.setup(camera, _ants, _subterranean, label, VIEW_SIZE)
+	observer.colony = colony
+	observer.ant_inspected.connect(_on_ant_inspected)
 	_build_food_dock(observer)
+	observer.food_layer = _food_layer
 
 	weather = WeatherScript.new()
 	weather.name = "Weather"
@@ -761,6 +764,7 @@ func _colony_stats() -> Dictionary:
 		"brood": brood,
 		"food": food,
 		"nest": [roundi(100.0 * dug / maxi(1, _subterranean.dug.size())), open_chambers, _subterranean.chambers.size()],
+		"guide": [notes.count_prefix("seen_"), BEHAVIORS.size()],
 	}
 
 
@@ -952,3 +956,39 @@ func _start_tips() -> void:
 	seq.tween_callback(tip.queue_free)
 	if not profile.is_preview:
 		_save_setting("tips", "shown", true)
+
+
+# ---------------------------------------------------------------------------
+# Behaviour field guide: real ant behaviours a player discovers by tapping an ant
+# while it is doing them.
+# ---------------------------------------------------------------------------
+
+const BEHAVIORS := {
+	"digging": ["Digging", "You watched a worker chew out a pellet of soil to extend the nest."],
+	"carry_soil": ["Carrying spoil", "You watched a digger carry excavated soil up to the mound."],
+	"carry_brood": ["Moving brood", "You watched a nurse carry brood to a better spot in the nest."],
+	"tending": ["Tending brood", "You watched a nurse groom the brood, licking it clean."],
+	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
+	"trophallaxis": ["Trophallaxis", "You watched two ants share food mouth to mouth."],
+	"antennation": ["Antennation", "You watched two nestmates touch antennae to recognise each other."],
+	"carry_food": ["Bringing food home", "You watched a forager carry food down to the stores."],
+	"harvesting": ["Harvesting", "You watched a forager cut or drink food before carrying it home."],
+	"foraging": ["Foraging", "You watched a forager search the surface for food."],
+	"haul_waste": ["Nest hygiene", "You watched a worker haul waste to the refuse heap."],
+	"resting": ["Resting", "You watched a worker resting; many workers in a real colony are idle."],
+	"callow": ["A callow worker", "You watched a newly emerged worker, still pale and soft."],
+	"guarding": ["Guarding", "You watched a big-headed defender on guard."],
+	"alate": ["Winged alate", "You watched a winged queen or male waiting for its mating flight."],
+	"flight": ["Nuptial flight", "You watched an alate take to the air on its mating flight."],
+}
+
+
+func _on_ant_inspected(ant: Node2D) -> void:
+	if ant == null:
+		return
+	var key: String = ant.behavior_key()
+	if key == "" or not BEHAVIORS.has(key) or notes.has_noted("seen_" + key):
+		return
+	notes.note(BEHAVIORS[key][1], "seen_" + key)
+	_announce("Behaviour observed: %s  (%d of %d)" % [BEHAVIORS[key][0], notes.count_prefix("seen_"),
+			BEHAVIORS.size()])

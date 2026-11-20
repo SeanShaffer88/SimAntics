@@ -148,6 +148,42 @@ func restore_extras(callow_left: float, departing: bool) -> void:
 	_departing = departing
 
 
+## Which field-guide behaviour this ant is showing right now, or "" (see main.gd BEHAVIORS).
+func behavior_key() -> String:
+	if state == State.FLYING:
+		return "flight"
+	if role == Role.ALATE:
+		return "alate"
+	if _callow_left > 0.0:
+		return "callow"
+	if _carried != null:
+		match str(_carried.get_meta("kind", "")):
+			"brood":
+				return "carry_brood"
+			"waste":
+				return "haul_waste"
+			"soil":
+				return "carry_soil"
+		return "carry_food"
+	if _greet_left > 0.0:
+		return "trophallaxis" if has_crop() else "antennation"
+	if _attending:
+		return "retinue"
+	if _dig_left > 0.0:
+		return "digging"
+	if _harvest_left > 0.0:
+		return "harvesting"
+	if _tend_x != INF and state == State.IDLE_CHAMBER:
+		return "tending"
+	if state == State.FORAGE_SURFACE:
+		return "foraging"
+	if state == State.IDLE_CHAMBER and _tunnels.chamber_role(_current_node) == "rest":
+		return "resting"
+	if role == Role.GUARD:
+		return "guarding"
+	return ""
+
+
 ## One line about this ant for the inspect label, e.g. "Nurse · major · 3 min old · carrying brood".
 func describe() -> String:
 	var parts: Array[String] = []

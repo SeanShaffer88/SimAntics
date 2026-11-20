@@ -167,6 +167,10 @@ func _clamped(pos: Vector2, zoom: float) -> Vector2:
 # ---------------------------------------------------------------------------
 
 var bird: Node2D  # taps on the bird startle it instead of inspecting
+var colony: Node  # for describing the queen and brood
+var food_layer: Node2D  # food piles on the surface
+
+signal ant_inspected(ant: Node2D)
 
 
 func _inspect(world: Vector2) -> void:
@@ -179,11 +183,26 @@ func _inspect(world: Vector2) -> void:
 		if d < best_d:
 			best_d = d
 			best = ant
+	var queen_d := world.distance_to(_tunnels.queen_position())
+	if queen_d < 18.0 and (best == null or queen_d < best_d):
+		_followed = null  # the queen is bigger than her attendants: the closer one wins
+		_show(colony.describe_queen(), _tunnels.queen_position())
+		return
 	if best != null:
 		_followed = best
 		_show(best.describe(), best.global_position)
+		ant_inspected.emit(best)
 		return
 	_followed = null
+	var b = colony.brood_near(world, 7.0)
+	if b != null:
+		_show(colony.describe_brood(b), b.sprite.position)
+		return
+	if food_layer != null:
+		for pile: Node2D in food_layer.get_children():
+			if absf(pile.position.x - world.x) < 22.0 and absf(pile.position.y - 6.0 - world.y) < 16.0:
+				_show(_describe_food(pile), pile.position)
+				return
 	for id: int in _tunnels.chambers:
 		var c: Dictionary = _tunnels.chambers[id]
 		var center: Vector2 = _tunnels.nodes[id]
@@ -192,6 +211,18 @@ func _inspect(world: Vector2) -> void:
 				and world.y >= center.y - r.y and world.y <= _tunnels.chamber_floor_y(id) + 4.0:
 			_show(CHAMBER_NAMES.get(c["role"], "Chamber"), world)
 			return
+
+
+const FOOD_LABELS := {"sugar": "Sugar cube", "nectar": "Nectar", "fruit": "Fruit slice",
+		"protein": "Dead ladybugs", "seeds": "Seeds", "leaves": "Fresh leaves", "insects": "Dead insects"}
+
+
+## What a food pile is and how much is left (its pull on the colony stays hidden).
+func _describe_food(pile: Node2D) -> String:
+	var name: String = FOOD_LABELS.get(pile.kind, "Food")
+	if pile.get_meta("natural", false) and pile.kind == "seeds":
+		name = "Fallen seeds"
+	return "%s  ·  %d crumbs left" % [name, pile.crumbs]
 
 
 func _show(text: String, world: Vector2) -> void:

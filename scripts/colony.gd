@@ -97,6 +97,39 @@ var _retinue := 0  # nurses currently attending the queen
 const RETINUE_SIZE := 4
 
 
+func describe_queen() -> String:
+	var laid := int(stats.get("laid", 0))
+	var resting := _count_in_zone("queen_eggs")
+	return "The queen  ·  %d eggs laid  ·  %d beside her now" % [laid, resting] if laid > 0 \
+			else "The queen  ·  mother of the whole colony"
+
+
+## The brood item nearest `at` within `radius` px, or null.
+func brood_near(at: Vector2, radius: float) -> Brood:
+	var best: Brood = null
+	var best_d := radius
+	for b in brood:
+		if b.carried:
+			continue
+		var d := (b.sprite.position + Vector2(0.0, -2.0)).distance_to(at)
+		if d < best_d:
+			best_d = d
+			best = b
+	return best
+
+
+func describe_brood(b: Brood) -> String:
+	match b.stage:
+		Stage.EGG:
+			return "Egg  ·  hatching soon" if b.age > b.duration * 0.7 else "Egg"
+		Stage.LARVA:
+			if b.fed >= FEEDS_TO_PUPATE:
+				return "Larva  ·  well fed, about to pupate"
+			return "Larva  ·  fed %d of %d meals" % [b.fed, FEEDS_TO_PUPATE]
+	var kind := "Pupa in its cocoon" if _species["cocoons"] else "Pupa"
+	return "%s  ·  emerging soon" % kind if b.age > b.duration * 0.75 else kind
+
+
 ## Where a resting item of brood lies in a chamber (for an idle nurse to groom), or INF.
 func brood_position_in(chamber: int) -> Vector2:
 	var here: Array[Brood] = []
@@ -265,6 +298,7 @@ func _process(delta: float) -> void:
 		if _count_in_zone("queen_eggs") < MAX_QUEEN_EGGS and brood.size() < MAX_BROOD \
 				and _hungry_larvae() < 16:
 			_add_brood(Stage.EGG, _tunnels.queen_chamber(), "queen_eggs", 0.0)
+			count("laid")
 			_tunnels.queen_lay_pulse()
 
 	_reserve_clock -= delta
