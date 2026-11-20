@@ -10,6 +10,7 @@ A passive, observational ant-farm simulation for Android, built in Godot 4.7.2 (
 - **Rain.** Showers darken the topsoil, which dries over time; damp soil is quicker to dig, and foragers drink the drops left on the grass.
 - **Nutrition.** Stored food is sugary (sugar, nectar, fruit), protein (ladybugs, insects) or both (seeds, leaves). Workers live on sugars; larvae only grow on protein, and the queen needs protein to lay. What you feed shapes how the colony grows.
 - **Life and death.** Workers live a few times longer than they took to develop. Old foragers die out on a trip; ants that die in the nest are left until they start to smell, then carried to the refuse pile (harvesters leave them on the midden outside).
+- **Temperature.** Air and soil temperature follow the season, the time of day and the weather; the daily swing fades with depth. Ants are cold-blooded: they slow in the cold and speed up in warmth. Each species forages only within its own ground-temperature range, and nurses keep the brood in whichever nursery is closest to 28°C. The info panel shows ground, upper-nest and deep temperatures.
 - **Founding and digging.** A new colony starts as a founding queen, her first brood and four workers in one small chamber. Workers dig the rest of the nest out over time:
   - Each soil pellet they carry out lands on a growing mound.
   - Chambers widen as they're dug.

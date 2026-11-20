@@ -10,6 +10,7 @@ extends Node2D
 const ColonyArt := preload("res://scripts/colony_art.gd")
 const Tunnels := preload("res://scripts/subterranean_layer.gd")
 const ColonyScript := preload("res://scripts/colony.gd")
+const Climate := preload("res://scripts/climate.gd")
 
 enum State { PATROL_TUNNEL, IDLE_CHAMBER, FORAGE_SURFACE, TASK, LEAVING, FLYING }
 enum Role { NURSE, WORKER, FORAGER, GUARD, ALATE }
@@ -543,7 +544,8 @@ func _choose_destination() -> int:
 			options.append(id)
 			var night_factor := 1.0
 			if key == "surface" and _colony != null:
-				night_factor = 0.0 if _colony.raining or _colony.winter else (0.15 if _colony.night else 1.0)
+				night_factor = 0.0 if _colony.raining or _colony.winter or not _colony.forage_ok \
+						else (0.15 if _colony.night else 1.0)
 			weights.append(float(table[key]) * night_factor / ids.size())
 	if options.is_empty():
 		return Tunnels.ENTRANCE
@@ -772,6 +774,21 @@ func _update_idle(delta: float) -> void:
 		_sprite.rotation = sin(age * 6.0) * 0.1  # head working over the brood
 
 
+var _warmth_cache := 1.0
+var _warmth_clock := 0.0
+
+
+## Speed factor from the temperature where the ant is (refreshed a few times a second).
+func _warmth() -> float:
+	if _colony == null or _colony.climate == null:
+		return 1.0
+	_warmth_clock -= get_process_delta_time()
+	if _warmth_clock <= 0.0:
+		_warmth_clock = 0.4
+		_warmth_cache = Climate.activity(_colony.temperature_at(position.y))
+	return _warmth_cache
+
+
 ## Old age: the ant stops where it is and dies; nestmates will carry the body out.
 func _die() -> void:
 	if _attending:
@@ -810,7 +827,8 @@ func _start_surface_trip() -> void:
 
 func _update_surface(delta: float) -> void:
 	_state_timer -= delta
-	if _colony != null and (_colony.raining or _colony.winter) and not _returning and not _departing:
+	if _colony != null and (_colony.raining or _colony.winter or not _colony.forage_ok) \
+			and not _returning and not _departing:
 		# rain: drop whatever it was doing and hurry home
 		_food_target = null
 		_harvest_left = -1.0
@@ -940,6 +958,11 @@ func _update_aphids(delta: float) -> bool:
 	_to_aphids = false
 	fill_crop()
 	_colony.count("honeydew")
+	if _task.is_empty():
+		var load := _colony.honeydew_task()  # the honeydew goes into the colony's stores
+		if not load.is_empty():
+			_hold(load["item"])
+			_task = load
 	_state_timer = 0.0
 	return false
 
@@ -1046,7 +1069,7 @@ func _leave_for_good() -> void:
 ## Advances along _path; returns true once the path is empty.
 func _follow_path(delta: float) -> bool:
 	_moving = false
-	var step := _speed * delta * (0.6 if _colony != null and _colony.winter else 1.0)  # cold ants are slow
+	var step := _speed * delta * _warmth()  # cold-blooded: slow in the cold, brisk in the warm
 	while step > 0.0 and not _path.is_empty():
 		var to_target := _path[0] - position
 		var dist := to_target.length()

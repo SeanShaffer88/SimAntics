@@ -45,7 +45,7 @@ func _ready() -> void:
 	title.add_theme_color_override("font_color", TEXT)
 	box.add_child(title)
 	_rows["title"] = title
-	for key in ["age", "workers", "roles", "brood", "food", "nest", "guide"]:
+	for key in ["age", "workers", "roles", "brood", "food", "climate", "nest", "guide"]:
 		var row := Label.new()
 		row.add_theme_font_size_override("font_size", 14)
 		row.add_theme_color_override("font_color", DIM)
@@ -154,6 +154,7 @@ func _update() -> void:
 	_rows["roles"].text = "%d nurses, %d nest workers, %d foragers, %d guards" % s["roles"]
 	_rows["brood"].text = "Brood: %d eggs, %d larvae, %d pupae" % s["brood"]
 	_rows["food"].text = "Food stored: %d  ·  %d sugary, %d with protein" % s["food"]
+	_rows["climate"].text = "Ground %d°C  ·  upper nest %d°C  ·  deep %d°C%s" % s["climate"]
 	_rows["nest"].text = "Nest dug: %d%%  ·  %d of %d chambers open" % s["nest"]
 	_rows["guide"].text = "Behaviours observed: %d of %d  (tap ants to discover more)" % s["guide"]
 	_graph.queue_redraw()

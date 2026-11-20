@@ -216,6 +216,10 @@ func food_position_in(chamber: int) -> Vector2:
 	return (store[_rng.randi() % store.size()] as Sprite2D).position
 
 
+var climate: RefCounted = null  # climate.gd, set by Main
+var forage_ok := true  # the surface is within this species' foraging temperatures
+var ground_y := 120.0
+var nest_bottom := 686.0
 var threat: Node2D = null  # a spider prowling the surface that the ants will mob, or null
 var soil_wetness := 0.0  # 0..1, from recent rain
 var water: Node2D = null  # rain drops on the surface (water_drops.gd), or null
@@ -352,16 +356,34 @@ func _misplaced(b: Brood) -> bool:
 ## The nursery the brood should be in right now: brood is carried up into warm shallow
 ## soil by day and back down to the steadier deep soil at night, as real nurses do.
 ## -1 when the colony has only one nursery.
+## The nursery whose temperature is closest to what brood develops best at (about
+## 28 deg C). Upper chambers win on warm days, deeper ones on cold nights, so the
+## nurses carry the brood up and down with the weather, as real ants do.
 func _warm_nursery() -> int:
 	var ids := _nursery_ids()
-	if ids.size() < 2:
+	if ids.size() < 2 or climate == null:
 		return -1
 	var pick: int = ids[0]
+	var best := INF
 	for id in ids:
-		var y: float = _tunnels.nodes[id].y
-		if (night and y > _tunnels.nodes[pick].y) or (not night and y < _tunnels.nodes[pick].y):
+		var miss := absf(temperature_at(_tunnels.nodes[id].y) - BROOD_IDEAL)
+		if miss < best - 0.5:  # a clear difference only, so brood is not shuffled back and forth
+			best = miss
 			pick = id
 	return pick
+
+
+const BROOD_IDEAL := 28.0
+
+
+## Temperature (deg C) at a height on screen: the ground surface above ground level,
+## the soil at that depth below it.
+func temperature_at(y: float) -> float:
+	if climate == null:
+		return 20.0
+	if y <= ground_y + 2.0:
+		return climate.surface
+	return climate.at_depth((y - ground_y) / maxf(nest_bottom - ground_y, 1.0))
 
 
 func _add_brood(stage: Stage, chamber: int, zone: String, age: float) -> Brood:
@@ -632,6 +654,16 @@ func forage_task() -> Dictionary:
 		return {"type": "store", "item": drop, "drop_node": target, "zone": "food"}
 	var item := _tunnels.add_item(_tunnels.food_texture(_species), Vector2.ZERO, "food")
 	return {"type": "store", "item": item, "drop_node": target, "zone": "food"}
+
+
+## Honeydew from the aphids, brought home to the stores (sugars for the workers).
+func honeydew_task() -> Dictionary:
+	var targets := _tunnels.chambers_with_role("food")
+	if targets.is_empty():
+		return {}
+	var drop := _tunnels.add_item(ColonyArt.food_crumb("nectar", 0), Vector2.ZERO, "food")
+	drop.set_meta("nutrient", "sugar")
+	return {"type": "store", "item": drop, "drop_node": targets[_rng.randi() % targets.size()], "zone": "food"}
 
 
 ## The ant has reached the pickup spot: returns the sprite it now carries, or null if

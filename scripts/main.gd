@@ -92,6 +92,8 @@ func _ready() -> void:
 	colony.setup(_subterranean, profile.species, profile.seed_value, int(range_workers[1] * 1.5),
 			saved.get("colony", {}), founding)
 	colony.set_soil_color(profile.soil["strata"][1])
+	colony.ground_y = GROUND_Y
+	colony.nest_bottom = VIEW_SIZE.y - NestGenerator.BOTTOM_MARGIN
 	colony.worker_emerged.connect(_on_worker_emerged)
 	_build_ambiance()
 	_spoil = SpoilHeapScript.new()
@@ -183,6 +185,7 @@ func _process(delta: float) -> void:
 	_update_expansion(delta)
 	_update_wetness(delta)
 	_update_spider(delta)
+	_update_climate(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -821,6 +824,8 @@ func _colony_stats() -> Dictionary:
 		"roles": roles,
 		"brood": brood,
 		"food": [food, colony.store_counts().x, colony.store_counts().y],
+		"climate": [roundi(climate.surface), roundi(climate.at_depth(0.3)), roundi(climate.deep),
+				"" if colony.forage_ok else "  ·  no foraging"],
 		"nest": [roundi(100.0 * dug / maxi(1, _subterranean.dug.size())), open_chambers, _subterranean.chambers.size()],
 		"guide": [notes.count_prefix("seen_"), _guide_total()],
 	}
@@ -1110,6 +1115,30 @@ func _on_corpse_dumped(x: float, texture: Texture2D) -> void:
 	fade.tween_interval(240.0)
 	fade.tween_property(body, "modulate:a", 0.0, 20.0)
 	fade.tween_callback(body.queue_free)
+
+
+const ClimateScript := preload("res://scripts/climate.gd")
+var climate := ClimateScript.new()
+
+
+## Advances the weather's temperatures and decides whether it is foraging weather for
+## this species (with a degree of slack either way so foragers don't dither).
+func _update_climate(delta: float) -> void:
+	if seasons == null or weather == null:
+		return
+	climate.update(seasons.season(), seasons.progress(), _day_night.time_of_day, _day_night.daylight,
+			weather.intensity if not weather.snow else 0.0, weather.snow_depth, delta)
+	colony.climate = climate
+	var window: Array = profile.species.get("forage_temp", [10.0, 40.0])
+	var t := climate.surface
+	if colony.forage_ok and (t < float(window[0]) - 1.0 or t > float(window[1]) + 1.0):
+		colony.forage_ok = false
+		if t > float(window[1]):
+			notes.note("Too hot to forage: at %d deg C the ground was above what %s ants will cross, so they waited underground for it to cool." % [roundi(t), profile.species["name"].to_lower().replace(" ant", "")], "too_hot")
+		elif not colony.winter:
+			notes.note("Too cold to forage: at %d deg C the ants were too sluggish to go out." % roundi(t), "too_cold")
+	elif not colony.forage_ok and t >= float(window[0]) + 1.0 and t <= float(window[1]) - 1.0:
+		colony.forage_ok = true
 
 
 const SpiderScript := preload("res://scripts/spider.gd")

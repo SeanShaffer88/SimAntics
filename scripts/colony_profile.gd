@@ -16,7 +16,7 @@ const SETTINGS_PATH := "user://simantics.cfg"
 ##   cocoons  - true where pupae spin cocoons (Formicinae); false = naked pupae
 const SPECIES := [
 	{
-		"id": "harvester", "name": "Red Harvester Ant",
+		"id": "harvester", "forage_temp": [16.0, 47.0], "name": "Red Harvester Ant",
 		"body": Color("#9c3c18"), "gaster": Color("#8a3014"), "dark": Color("#3e1206"), "light": Color("#e08a58"),
 		"castes": [{"name": "worker", "weight": 1.0, "size": 1.0, "head": 1.1}],
 		"workers": [16, 22], "depth": [0.85, 1.0], "chambers": [7, 10], "shafts": [1, 2],
@@ -24,7 +24,7 @@ const SPECIES := [
 		"speed": 1.0,
 	},
 	{
-		"id": "bigheaded", "name": "Big-headed Ant",
+		"id": "bigheaded", "forage_temp": [15.0, 36.0], "name": "Big-headed Ant",
 		"body": Color("#7a4a22"), "gaster": Color("#5a3416"), "dark": Color("#2a160a"), "light": Color("#c08a50"),
 		"castes": [
 			{"name": "minor", "weight": 0.8, "size": 0.8, "head": 1.0},
@@ -35,7 +35,7 @@ const SPECIES := [
 		"speed": 1.1,
 	},
 	{
-		"id": "leafcutter", "name": "Leafcutter Ant",
+		"id": "leafcutter", "forage_temp": [18.0, 34.0], "name": "Leafcutter Ant",
 		"body": Color("#a0461e"), "gaster": Color("#8c3c18"), "dark": Color("#3a1406"), "light": Color("#e0905a"),
 		"castes": [
 			{"name": "minima", "weight": 0.35, "size": 0.7, "head": 1.0},
@@ -47,7 +47,7 @@ const SPECIES := [
 		"speed": 0.9,
 	},
 	{
-		"id": "pavement", "name": "Pavement Ant",
+		"id": "pavement", "forage_temp": [12.0, 37.0], "name": "Pavement Ant",
 		"body": Color("#4a3426"), "gaster": Color("#2e2018"), "dark": Color("#140c08"), "light": Color("#8a6a52"),
 		"castes": [{"name": "worker", "weight": 1.0, "size": 0.85, "head": 1.05}],
 		"workers": [20, 28], "depth": [0.5, 0.7], "chambers": [6, 9], "shafts": [1, 2],
@@ -55,7 +55,7 @@ const SPECIES := [
 		"speed": 1.15,
 	},
 	{
-		"id": "garden", "name": "Black Garden Ant",
+		"id": "garden", "forage_temp": [10.0, 32.0], "name": "Black Garden Ant",
 		"body": Color("#3a2a22"), "gaster": Color("#241a16"), "dark": Color("#0e0806"), "light": Color("#7a6458"),
 		"castes": [{"name": "worker", "weight": 1.0, "size": 0.9, "head": 1.0}],
 		"workers": [18, 26], "depth": [0.65, 0.9], "chambers": [6, 9], "shafts": [1, 2],
