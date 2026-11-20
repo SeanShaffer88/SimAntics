@@ -29,10 +29,17 @@ var _colors: Array[Color] = []
 var _rng := RandomNumberGenerator.new()
 
 
+const ColonyArt := preload("res://scripts/colony_art.gd")
+var _pellets: Array[Texture2D] = []
+
+
 func setup(ground_y: float, soil: Color, seed_value: int) -> void:
 	_ground_y = ground_y
 	_rng.seed = seed_value + 55
 	_colors = [soil, soil.darkened(0.15), soil.lightened(0.12), soil.darkened(0.3)]
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	for c in _colors:  # pellets of excavated soil in a few shades
+		_pellets.append(ColonyArt.soil_pellet(c))
 
 
 ## Drops one pellet of soil at x.
@@ -60,14 +67,21 @@ func add_hole(x: float) -> void:
 func _draw() -> void:
 	for x in _holes:
 		draw_rect(Rect2(roundf(x) - 4.0, _ground_y - 2.0, 8.0, 10.0), HOLE_COLOR)
-	for col: int in _columns:
+	# the mound: a heap of soil pellets, each one a pellet a digger carried up
+	var cols := _columns.keys()
+	cols.sort()
+	for col: int in cols:
 		var h: int = _columns[col]
 		for row in h:
-			var c := _colors[(col * 7 + row * 3) % _colors.size()]
-			draw_rect(Rect2(col * PIXEL, _ground_y - (row + 1) * PIXEL, PIXEL, PIXEL), c)
+			var k := col * 7 + row * 3
+			var jitter := Vector2(float(posmod(k * 13, 5)) * 0.3 - 0.6, float(posmod(k * 7, 3)) * 0.3 - 0.3)
+			var at := Vector2(col * PIXEL - 0.5, _ground_y - (row + 1) * PIXEL - 0.8) + jitter
+			draw_texture_rect(_pellets[posmod(k, _pellets.size())], Rect2(at, Vector2(3.2, 3.2)), false)
+	# seed husks thrown out on the harvesters' midden
 	for i in _chaff.size():
 		var p := _chaff[i]
-		draw_rect(Rect2(p.x, p.y - 1.0, 2.0, 1.0), CHAFF_COLORS[i % CHAFF_COLORS.size()])
+		draw_texture_rect(ColonyArt.waste_bit("seeds", i % 2), Rect2(p + Vector2(-1.5, -2.0), Vector2(3.0, 2.0)), false,
+				CHAFF_COLORS[i % CHAFF_COLORS.size()].lightened(0.3))
 
 
 func to_save() -> Dictionary:

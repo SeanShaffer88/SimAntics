@@ -206,40 +206,59 @@ static func _ground(img: Image, width: int, height: int, ground_row: int, rng: R
 	var light: Color = p["grass_light"]
 	var blade_max: int = int(p["blade_max"]) * D
 	var chance: float = p["grass_chance"]
-	for y in range(ground_row, height):
-		for x in width:
+	# the soil band, speckled at full resolution
+	for yy in range(ground_row * SS, height * SS):
+		for xx in width * SS:
 			var c := soil_a if rng.randf() < 0.7 else soil_b
-			if y == ground_row + 1:
+			if yy < (ground_row + 2) * SS:
 				c = c.darkened(0.12)  # shadow under the turf
-			_px(img, x, y, c)
-	for x in width:
-		_px(img, x, ground_row, dark if rng.randf() < 0.6 else light)
-		if rng.randf() < chance * 1.4:
-			var blade := rng.randi_range(1, blade_max)
-			var lean := rng.randf_range(-0.35, 0.35)
-			for k in range(1, blade + 1):
-				var t := float(k) / blade
-				var bx := x + roundi(lean * k)
-				_px(img, bx, ground_row - k, dark.lerp(light, t).lightened(0.12 * t * t))
+			img.set_pixel(xx, yy, c)
+	# turf, then fine grass blades: each a tapering, leaning line one full-res pixel wide
+	for xx in width * SS:
+		img.set_pixel(xx, ground_row * SS, dark if rng.randf() < 0.6 else light)
+		img.set_pixel(xx, ground_row * SS + 1, dark.darkened(0.1))
+	for xx in width * SS:
+		if rng.randf() >= chance * 1.4:
+			continue
+		var blade := rng.randi_range(2, blade_max * SS)
+		var lean := rng.randf_range(-0.4, 0.4)
+		for k in range(1, blade + 1):
+			var t := float(k) / blade
+			var bx := xx + roundi(lean * k * (0.4 + t))
+			if bx >= 0 and bx < width * SS:
+				img.set_pixel(bx, ground_row * SS - k, dark.lerp(light, t).lightened(0.12 * t * t))
 
 
 ## The ring of excavated soil around an opening, shaded and speckled with pellets.
 static func _mound(img: Image, height: int, ground_row: int, col: int, mound: Color, top: Color,
 		half_width: int, tall: int, rng: RandomNumberGenerator) -> void:
-	for dx in range(-half_width, half_width + 1):
-		var t := float(dx) / half_width
-		var mh := roundi(tall * (1.0 - t * t))
-		for k in range(0, mh + 1):
-			var lit := clampf(0.5 - t * 0.45 + float(k) / maxf(1.0, mh) * 0.3, 0.0, 1.0)
+	# a smooth dome of excavated soil, lit from the upper left, at full resolution
+	for xx in range((col - half_width) * SS, (col + half_width + 1) * SS):
+		if xx < 0 or xx >= img.get_width():
+			continue
+		var t := ((xx + 0.5) / SS - col) / half_width
+		var mh := tall * (1.0 - t * t) * SS
+		if mh <= 0.0:
+			continue
+		var top_y := (ground_row + 1) * SS - mh
+		for yy in range(maxi(0, floori(top_y)), (ground_row + 1) * SS):
+			var k := ((ground_row + 1) * SS - yy) / maxf(1.0, mh)
+			var lit := clampf(0.5 - t * 0.45 + k * 0.3, 0.0, 1.0)
 			var c := mound.darkened(0.25).lerp(top.lightened(0.1), lit)
-			if rng.randf() < 0.12:
-				c = c.lightened(0.15)  # a pellet catching the light
-			_px(img, col + dx, ground_row - k, c)
+			var grain := rng.randf()
+			if grain < 0.1:
+				c = c.lightened(0.18)  # a pellet catching the light
+			elif grain > 0.93:
+				c = c.darkened(0.15)
+			var cover := clampf(yy + 1.0 - top_y, 0.0, 1.0)
+			img.set_pixel(xx, yy, img.get_pixel(xx, yy).lerp(c, cover))
 	var hole := 2 * D if tall >= 3 * D else D + 1
-	for x in range(col - hole, col + hole + 1):
-		for y in range(ground_row - tall, height):
-			var edge := absi(x - col) == hole
-			_px(img, x, y, HOLE.lightened(0.08) if edge else HOLE)
+	for xx in range((col - hole) * SS, (col + hole + 1) * SS):
+		for yy in range((ground_row - tall) * SS, height * SS):
+			if xx < 0 or xx >= img.get_width():
+				continue
+			var edge := xx < (col - hole) * SS + 1 or xx >= (col + hole + 1) * SS - 1
+			img.set_pixel(xx, yy, HOLE.lightened(0.1) if edge else HOLE)
 
 
 # ---------------------------------------------------------------------------

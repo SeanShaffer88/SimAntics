@@ -7,12 +7,13 @@ signal ant_taken
 signal scared_off
 
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
+const ColonyArt := preload("res://scripts/colony_art.gd")
 
 enum State { WAITING, SWOOP, HOP, SNATCH, LEAVE, SCARED }
 
 const INTERVAL := Vector2(150.0, 360.0)  # seconds between visits
 const RETRY := 20.0  # check again soon if nobody is outside
-const SCALE := 2.0
+const SCALE := 0.5  # the hi-res bird art is drawn at twice screen size
 const TAPS_TO_SCARE := 3
 const HIT_RADIUS := 26.0
 
@@ -44,8 +45,9 @@ func setup(ants: Node2D, colony: Node, day_night: Node, ground_y: float, width: 
 	_rng.seed = seed_value + 3101
 	_clock = _rng.randf_range(INTERVAL.x * 0.5, INTERVAL.y)
 	_sprite = Sprite2D.new()
+	_sprite.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_sprite.scale = Vector2.ONE * SCALE
-	_sprite.texture = PixelArt.bird_frame("perched")
+	_sprite.texture = ColonyArt.bird("perched")
 	add_child(_sprite)
 	visible = false
 
@@ -92,7 +94,7 @@ func _process(delta: float) -> void:
 				position = _to
 				state = State.HOP
 				_t = -_rng.randf_range(0.3, 0.8)  # look around first
-				_sprite.texture = PixelArt.bird_frame("perched")
+				_sprite.texture = ColonyArt.bird("perched")
 		State.HOP:
 			_update_hop(delta)
 		State.SNATCH:
@@ -124,12 +126,12 @@ func _update_hop(delta: float) -> void:
 	# one hop: a short arc toward the ant, then a pause
 	var hop := 0.18
 	var p := clampf(_t / hop, 0.0, 1.0)
-	_sprite.texture = PixelArt.bird_frame("hop")
+	_sprite.texture = ColonyArt.bird("hop")
 	position.x += signf(gap) * 70.0 * delta
 	_sprite.position.y = -sin(p * PI) * 6.0
 	if _t >= hop:
 		_sprite.position.y = 0.0
-		_sprite.texture = PixelArt.bird_frame("perched")
+		_sprite.texture = ColonyArt.bird("perched")
 		_t = -_rng.randf_range(0.35, 0.9)
 
 
@@ -200,7 +202,7 @@ func _pick_ant(near_x: float) -> Node2D:
 
 
 func _flap(phase: float) -> void:
-	_sprite.texture = PixelArt.bird_frame("flap_up" if int(phase) % 2 == 0 else "flap_down")
+	_sprite.texture = ColonyArt.bird("flap_up" if int(phase) % 2 == 0 else "flap_down")
 	_sprite.position.y = 0.0
 
 

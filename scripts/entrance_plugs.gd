@@ -5,6 +5,7 @@ extends Node2D
 ## their entrances against cold and rain.
 
 const PIXEL := 2.0
+const ColonyArt := preload("res://scripts/colony_art.gd")
 
 var _xs: Array[float] = []
 var _amount: PackedFloat32Array = PackedFloat32Array()  # 0 open .. 1 sealed, per entrance
@@ -17,6 +18,7 @@ var _pellets: Array[Vector3] = []  # x offset, height, colour index: the order p
 func setup(ground_y: float, soil: Color, seed_value: int) -> void:
 	_ground_y = ground_y
 	_colors = [soil, soil.darkened(0.2), soil.lightened(0.15), Color("#8a8478"), Color("#6e6a62")]
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value + 808
 	for row in 10:  # fill from the bottom of the hole up to a low cap above the ground
@@ -66,4 +68,8 @@ func _draw() -> void:
 			var p := _pellets[k]
 			var x := roundf(_xs[i] / PIXEL + p.x) * PIXEL
 			var y := _ground_y + 8.0 - p.y * PIXEL
-			draw_rect(Rect2(x, y, PIXEL, PIXEL), _colors[int(p.z)])
+			var ci := int(p.z)
+			if ci >= 3:  # a small pebble
+				draw_texture_rect(ColonyArt.stone(ci - 3), Rect2(x - 0.6, y - 0.6, 3.2, 2.8), false, _colors[ci])
+			else:
+				draw_texture_rect(ColonyArt.soil_pellet(_colors[ci]), Rect2(x - 0.6, y - 0.8, 3.2, 3.2), false)

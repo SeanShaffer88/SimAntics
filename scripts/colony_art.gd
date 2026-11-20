@@ -612,3 +612,80 @@ static func soil_cell(w: int, h: int) -> ImageTexture:
 		_ellipse(img, Vector2(w, h) * HI * 0.5, Vector2(w, h) * HI * 0.48, Color(0.12, 0.08, 0.05), Color(0.05, 0.03, 0.02),
 				Color(0.2, 0.14, 0.1), 0.0, 0, 0.0, 0.55, 0.0)
 		return img)
+
+
+# ---------------------------------------------------------------------------
+# The bird that hunts foragers on the surface
+# ---------------------------------------------------------------------------
+
+## A sparrow, facing right, about 30 x 20 screen px: "perched", "hop", "flap_up", "flap_down".
+static func bird(pose: String) -> ImageTexture:
+	return _cached("bird_" + pose, func() -> Image:
+		var img := _blank(32 * HI, 22 * HI)
+		var o := Vector2(0, 2) if pose in ["flap_up", "flap_down"] else Vector2.ZERO
+		var brown := Color("#8a6440")
+		var dark := Color("#4a3220")
+		var light := Color("#c89a68")
+		# legs (none while flying)
+		if pose == "perched":
+			for x: float in [13.0, 16.5]:
+				_capsule(img, Vector2(x, 15.5) * HI, Vector2(x, 19.5) * HI, 0.4 * HI, Color("#c89a78"))
+				_capsule(img, Vector2(x - 1.2, 19.6) * HI, Vector2(x + 1.4, 19.6) * HI, 0.3 * HI, Color("#b08060"))
+		elif pose == "hop":
+			_capsule(img, Vector2(13.0, 15.5) * HI, Vector2(11.5, 18.5) * HI, 0.4 * HI, Color("#c89a78"))
+			_capsule(img, Vector2(16.5, 15.5) * HI, Vector2(18.5, 18.5) * HI, 0.4 * HI, Color("#c89a78"))
+		# tail, body, cream breast
+		_capsule(img, (Vector2(8.5, 11.5) + o) * HI, (Vector2(1.5, 8.0) + o) * HI, 1.6 * HI, dark.lerp(brown, 0.4))
+		_ellipse(img, (Vector2(14, 11.5) + o) * HI, Vector2(7.5, 4.8) * HI, brown, dark, light, 0.4, 0, -0.18)
+		_ellipse(img, (Vector2(17, 13.2) + o) * HI, Vector2(5.0, 3.2) * HI, Color("#e8dcc4"), Color("#b8a888"),
+				Color("#fff8ea"), 0.3, 0, -0.2)
+		# streaked back
+		for i in 4:
+			var at := (Vector2(9.5 + i * 2.2, 9.2 + (i % 2) * 0.8) + o) * HI
+			_capsule(img, at, at + Vector2(1.6, 0.4) * HI, 0.35 * HI, dark, 0.8)
+		# head: chestnut crown, grey cheek, eye, beak
+		var head := (Vector2(22, 7.6) + o) * HI
+		_ellipse(img, head, Vector2(3.9, 3.6) * HI, Color("#9a6a40"), Color("#5a3a20"), Color("#d09a68"), 0.4)
+		_ellipse(img, head + Vector2(0.8, 1.3) * HI, Vector2(2.4, 1.6) * HI, Color("#b8b0a4"), Color("#8a8278"), Color("#e0d8cc"), 0.2)
+		_ellipse(img, head + Vector2(1.6, -0.4) * HI, Vector2(0.75, 0.75) * HI, Color("#141010"), Color("#000000"), Color("#606060"), 1.0, 0, 0.0, 1.0, 0.0)
+		_ellipse(img, head + Vector2(1.4, -0.7) * HI, Vector2(0.22, 0.22) * HI, Color.WHITE, Color.WHITE, Color.WHITE, 0.0)
+		var beak := head + Vector2(3.4, 0.4) * HI
+		_capsule(img, beak, beak + Vector2(2.4, 0.5) * HI, 0.75 * HI, Color("#d8a840"))
+		_capsule(img, beak + Vector2(0, 0.5) * HI, beak + Vector2(2.0, 0.9) * HI, 0.45 * HI, Color("#b08028"))
+		# wing: folded along the side, or raised / lowered in a wingbeat
+		var wing_c := (Vector2(13.5, 10.8) + o) * HI
+		var wing_ang := -0.15
+		var wing_r := Vector2(5.6, 2.6) * HI
+		if pose == "flap_up":
+			wing_c = (Vector2(13, 4.5) + o) * HI
+			wing_ang = -1.15
+			wing_r = Vector2(6.5, 2.4) * HI
+		elif pose == "flap_down":
+			wing_c = (Vector2(14, 17) + o) * HI
+			wing_ang = 1.0
+			wing_r = Vector2(6.5, 2.4) * HI
+		_ellipse(img, wing_c, wing_r, Color("#7a5634"), Color("#3e2a18"), Color("#b88a58"), 0.3, 4, wing_ang)
+		var bar := wing_c + Vector2(1.0, -0.4).rotated(wing_ang) * HI
+		_capsule(img, bar - Vector2(2.4, 0).rotated(wing_ang) * HI, bar + Vector2(2.4, 0).rotated(wing_ang) * HI,
+				0.35 * HI, Color("#efe4cc"), 0.9)  # pale wing bar
+		_outline(img, Color("#2a1c10"))
+		return img)
+
+
+## A neutral pebble (tinted per stone when drawn): rounded, lit from the upper left,
+## speckled with mineral grains, with a soft outline.
+static func stone(variant: int) -> ImageTexture:
+	return _cached("stone%d" % variant, func() -> Image:
+		var s := 24
+		var img := _blank(s * HI, s * HI)
+		var c := Vector2(s, s) * HI * 0.5
+		var r := Vector2(s * 0.46, s * 0.46) * HI
+		_ellipse(img, c, r, Color(0.86, 0.85, 0.83), Color(0.42, 0.41, 0.4), Color(1, 1, 1), 0.35, 0, variant * 0.7)
+		for i in 14 + variant * 3:
+			var p := c + Vector2(_hash(i, variant + 1.0) - 0.5, _hash(i + 40.0, variant + 2.0) - 0.5) * r * 1.4
+			if p.distance_to(c) < r.x * 0.8:
+				var shade := 0.55 + _hash(i, 99.0) * 0.5
+				_ellipse(img, p, Vector2(0.5, 0.4) * HI * (1.0 + _hash(i, 5.0)), Color(shade, shade * 0.98, shade * 0.95),
+						Color(shade * 0.7, shade * 0.7, shade * 0.7), Color.WHITE, 0.2, 0, 0.0, 0.7, 0.0)
+		_outline(img, Color(0.25, 0.22, 0.2))
+		return img)

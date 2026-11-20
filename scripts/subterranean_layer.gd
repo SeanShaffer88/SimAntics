@@ -45,6 +45,8 @@ var _seed := 0
 var _queen_home := -1
 var _wall_noise := FastNoiseLite.new()
 const BuriedLife := preload("res://scripts/buried_life.gd")
+const StonesLayer := preload("res://scripts/stones_layer.gd")
+var _stones: Node2D
 var life: Node2D  # creatures in the soil (buried_life.gd)
 var _gen: RefCounted
 var expansions := 0  # times the colony has extended the nest past its first plan
@@ -102,6 +104,7 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	var strata: Array = profile.soil["strata"]
 	_air = (strata[3] as Color).darkened(0.72)
 	_base = SoilArt.make_soil_image(_art_size.x, _art_size.y, _rng, strata)
+	var stones := SoilArt.make_stones(_art_size.x, _art_size.y, _rng)
 	_img = _base.duplicate()
 	_mask.resize(_art_size.x * _art_size.y)
 	_mask.fill(0)
@@ -115,8 +118,13 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	_soil.position = Vector2(0.0, soil_top)
 	_soil.scale = Vector2(px, px)
 	_setup_soil_shader()
+	_stones = StonesLayer.new()
+	_stones.name = "Stones"
+	add_child(_stones)
+	move_child(_stones, _soil.get_index() + 1)
+	_stones.setup(stones, float(px), soil_top, func(p: Vector2) -> bool: return not is_solid(p))
 	add_child(life)
-	move_child(life, _soil.get_index() + 1)
+	move_child(life, _stones.get_index() + 1)
 	life.build(func(p: Vector2) -> bool:
 		# already dug into (or right beside): found long ago
 		for k in 9:
@@ -303,6 +311,9 @@ func _repaint(changed: Rect2i) -> void:
 	SoilArt.paint_tunnels(_img, _base, _mask, _dist, paint_rect, _air)
 	(_soil.texture as ImageTexture).update(_img)
 	_update_mask_texture(paint_rect)
+	if _stones != null:
+		var px := float(SoilArt.PIXEL_SCALE)
+		_stones.dug_near(Rect2(Vector2(changed.position) * px + Vector2(0.0, _soil_top), Vector2(changed.size) * px).grow(6.0))
 
 
 const SoilShader := preload("res://shaders/soil.gdshader")

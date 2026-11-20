@@ -55,66 +55,29 @@ static func make_soil_image(width: int, height: int, rng: RandomNumberGenerator,
 			c = c.darkened(depth * 0.22)
 			img.set_pixel(x, y, c)
 
-	_paint_pebbles(img, rng)
-	_paint_bedrock(img, rng)
-	return img
+	return img  # pebbles and stones are separate hi-res sprites (see make_stones)
 
 
-## Stony subsoil along the bottom: big, shaded rocks the colony digs around.
-static func _paint_bedrock(img: Image, rng: RandomNumberGenerator) -> void:
-	var w := img.get_width()
-	var h := img.get_height()
-	var x := rng.randf_range(-4.0, 4.0)
-	while x < w + 6.0:
-		var r := rng.randf_range(4.0, 9.0)
-		var cy := h - rng.randf_range(1.0, 7.0)
-		_stone(img, Vector2(x, cy), r, rng.randf_range(0.55, 0.85),
-				Color.from_hsv(rng.randf_range(0.06, 0.12), rng.randf_range(0.05, 0.18), rng.randf_range(0.42, 0.6)))
-		x += r * rng.randf_range(1.2, 1.8)
-	for i in 14:  # a few loose stones higher up
-		_stone(img, Vector2(rng.randf_range(0.0, w), h - rng.randf_range(10.0, 26.0)), rng.randf_range(2.5, 5.0),
-				rng.randf_range(0.6, 0.9),
-				Color.from_hsv(rng.randf_range(0.06, 0.12), rng.randf_range(0.05, 0.18), rng.randf_range(0.45, 0.62)))
-
-
-static func _stone(img: Image, c: Vector2, r: float, squash: float, tone: Color) -> void:
-	for y in range(floori(c.y - r * squash), ceili(c.y + r * squash) + 1):
-		for x in range(floori(c.x - r), ceili(c.x + r) + 1):
-			if x < 0 or y < 0 or x >= img.get_width() or y >= img.get_height():
-				continue
-			var n := Vector2((x + 0.5 - c.x) / r, (y + 0.5 - c.y) / (r * squash))
-			var d := n.length()
-			if d > 1.0:
-				continue
-			var lambert := clampf(-n.dot(LIGHT_DIR) * 0.6 + 0.55, 0.0, 1.0)
-			var col := tone.darkened(0.4).lerp(tone.lightened(0.3), lambert)
-			if d > 0.86:
-				col = col.darkened(0.3)
-			img.set_pixel(x, y, col)
-
-
-static func _paint_pebbles(img: Image, rng: RandomNumberGenerator) -> void:
-	var w := img.get_width()
-	var h := img.get_height()
+## Pebbles through the soil and big stones in the subsoil along the bottom, in art
+## pixels: {"c": centre, "r": radius, "squash": height / width, "tone": Color}.
+static func make_stones(width: int, height: int, rng: RandomNumberGenerator) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
 	for i in 55:
-		var cx := rng.randf_range(2.0, w - 2.0)
-		var cy := rng.randf_range(10.0, h - 2.0)
+		var c := Vector2(rng.randf_range(2.0, width - 2.0), rng.randf_range(10.0, height - 2.0))
 		var r := rng.randf_range(0.8, 2.6) if rng.randf() < 0.9 else rng.randf_range(3.0, 5.0)
 		var tone := Color.from_hsv(rng.randf_range(0.05, 0.1), rng.randf_range(0.2, 0.4), rng.randf_range(0.4, 0.62))
-		var squash := rng.randf_range(0.6, 1.0)
-		for y in range(floori(cy - r), ceili(cy + r) + 1):
-			for x in range(floori(cx - r), ceili(cx + r) + 1):
-				if x < 0 or y < 0 or x >= w or y >= h:
-					continue
-				var n := Vector2((x + 0.5 - cx) / r, (y + 0.5 - cy) / (r * squash))
-				var d := n.length()
-				if d > 1.0:
-					continue
-				var lambert := clampf(-n.dot(LIGHT_DIR) * 0.6 + 0.55, 0.0, 1.0)
-				var c := tone.darkened(0.35).lerp(tone.lightened(0.25), lambert)
-				if d > 0.82:
-					c = c.darkened(0.25)
-				img.set_pixel(x, y, c)
+		out.append({"c": c, "r": r, "squash": rng.randf_range(0.6, 1.0), "tone": tone})
+	var x := rng.randf_range(-4.0, 4.0)
+	while x < width + 6.0:
+		var r := rng.randf_range(4.0, 9.0)
+		out.append({"c": Vector2(x, height - rng.randf_range(1.0, 7.0)), "r": r, "squash": rng.randf_range(0.55, 0.85),
+				"tone": Color.from_hsv(rng.randf_range(0.06, 0.12), rng.randf_range(0.05, 0.18), rng.randf_range(0.42, 0.6))})
+		x += r * rng.randf_range(1.2, 1.8)
+	for i in 14:  # a few loose stones higher up
+		out.append({"c": Vector2(rng.randf_range(0.0, width), height - rng.randf_range(10.0, 26.0)),
+				"r": rng.randf_range(2.5, 5.0), "squash": rng.randf_range(0.6, 0.9),
+				"tone": Color.from_hsv(rng.randf_range(0.06, 0.12), rng.randf_range(0.05, 0.18), rng.randf_range(0.45, 0.62))})
+	return out
 
 
 ## Distance (art pixels, capped) from each pixel to the nearest open-air pixel,
