@@ -513,3 +513,69 @@ func _relocate(b: Brood) -> void:
 		b.chamber = _nurseries[_rng.randi() % _nurseries.size()]
 	b.zone = b.wants_zone()
 	b.sprite.position = _tunnels.zone_spot(b.chamber, b.zone).round()
+
+
+# ---------------------------------------------------------------------------
+# Food the player drops on the surface
+# ---------------------------------------------------------------------------
+
+var clusters: Array[Node2D] = []
+var _recruits: Dictionary = {}  # cluster instance id -> nestmates still to send
+
+
+func add_cluster(cluster: Node2D) -> void:
+	clusters.append(cluster)
+	cluster.tree_exiting.connect(func():
+		clusters.erase(cluster)
+		_recruits.erase(cluster.get_instance_id()))
+
+
+## The most tempting food a surface ant at `x` can sense, or null. Stronger foods are
+## noticed from further away and win over closer, plainer ones.
+func sense_food(x: float) -> Node2D:
+	var best: Node2D = null
+	var best_score := 0.0
+	for c in clusters:
+		if not is_instance_valid(c) or c.is_empty():
+			continue
+		var reach: float = 170.0 + 360.0 * c.pull()
+		var dist := absf(c.position.x - x)
+		if dist > reach:
+			continue
+		var score: float = c.pull() / (1.0 + dist / 200.0)
+		if score > best_score:
+			best_score = score
+			best = c
+	return best
+
+
+## A forager came home with a crumb: its trail recruits more nestmates to that food.
+func report_find(cluster: Node2D) -> void:
+	var id := cluster.get_instance_id()
+	_recruits[id] = mini(int(_recruits.get(id, 0)) + cluster.recruits_per_trip(), cluster.crumbs)
+
+
+## A food that still needs hands, for an ant leaving the nest, or null.
+func take_recruit() -> Node2D:
+	if night:
+		return null
+	var options: Array[Node2D] = []
+	for c in clusters:
+		if is_instance_valid(c) and not c.is_empty() and int(_recruits.get(c.get_instance_id(), 0)) > 0:
+			options.append(c)
+	if options.is_empty():
+		return null
+	options.sort_custom(func(a: Node2D, b: Node2D) -> bool: return a.pull() > b.pull())
+	var pick := options[0]
+	_recruits[pick.get_instance_id()] = int(_recruits[pick.get_instance_id()]) - 1
+	return pick
+
+
+## The crumb an ant carries home from a food drop, and where it goes.
+func crumb_task(kind: String) -> Dictionary:
+	var targets := _tunnels.chambers_with_role("fungus" if _species["food"] == "fungus" else "food")
+	if targets.is_empty():
+		targets = _tunnels.chambers_with_role("nursery")
+	var item := _tunnels.add_item(ColonyArt.food_crumb(kind, _rng.randi_range(0, 2)), Vector2.ZERO, "food")
+	count("crumb_" + kind)
+	return {"type": "store", "item": item, "drop_node": targets[_rng.randi() % targets.size()], "zone": "food"}

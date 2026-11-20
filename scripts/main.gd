@@ -16,6 +16,9 @@ const AmbienceScript := preload("res://scripts/ambience.gd")
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
 const GREET_CHECK := 0.3  # seconds between checks for ants meeting head-on
 const SaveGame := preload("res://scripts/save_game.gd")
+const FoodClusterScript := preload("res://scripts/food_cluster.gd")
+const FoodDockScript := preload("res://scripts/food_dock.gd")
+const MAX_FOOD_DROPS := 6
 const AUTOSAVE_INTERVAL := 30.0
 const MIN_AWAY := 60.0  # shorter absences are not worth a catch-up message
 
@@ -35,6 +38,9 @@ var _day_night: DayNightScript
 var _ambience: AmbienceScript
 var _greet_clock := 0.0
 var _autosave_clock := AUTOSAVE_INTERVAL
+var _food_layer: Node2D
+var _dock: FoodDockScript
+var _observer: ObserverScript
 
 @onready var _surface: SurfaceLayerScript = $SurfaceLayer
 @onready var _subterranean: SubterraneanLayerScript = $SubterraneanLayer
@@ -59,6 +65,7 @@ func _ready() -> void:
 	var away := ""
 	if saved.has("ants"):
 		_restore_ants(saved)
+		_food_restore(saved)
 		away = _catch_up(saved)
 	else:
 		_spawn_colony()
@@ -133,6 +140,7 @@ func _build_ambiance() -> void:
 	add_child(observer)
 	move_child(observer, _ants.get_index() + 1)
 	observer.setup(camera, _ants, _subterranean, label, VIEW_SIZE)
+	_build_food_dock(observer)
 
 	# warm desk-lamp falloff: the middle of the farm glows, the corners sink into shadow
 	var shade := CanvasLayer.new()
@@ -304,7 +312,7 @@ func save_colony() -> void:
 		if not ant.is_queued_for_deletion():
 			ants.append(ant.to_save())
 	SaveGame.write({"seed": profile.seed_value, "colony": colony.to_save(), "ants": ants,
-			"time_of_day": _day_night.time_of_day, "spawned": _spawned})
+			"time_of_day": _day_night.time_of_day, "spawned": _spawned, "food_drops": _food_save()})
 
 
 func _restore_ants(saved: Dictionary) -> void:
@@ -393,3 +401,59 @@ func _save_setting(section: String, key: String, value: Variant) -> void:
 	config.load(SETTINGS_PATH)  # keep the colony seed and other settings
 	config.set_value(section, key, value)
 	config.save(SETTINGS_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Food the player drops on the surface
+# ---------------------------------------------------------------------------
+
+func _build_food_dock(observer: ObserverScript) -> void:
+	_observer = observer
+	_food_layer = Node2D.new()
+	_food_layer.name = "FoodDrops"
+	add_child(_food_layer)
+	move_child(_food_layer, _ants.get_index())  # food sits under the ants
+
+	_dock = FoodDockScript.new()
+	_dock.name = "FoodDock"
+	_dock.theme = _selector.theme
+	_dock.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_dock.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_dock.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_dock.offset_bottom = -12.0
+	$UI.add_child(_dock)
+	_dock.dropped.connect(_on_food_dropped)
+	observer.input_blocked = _dock.owns_pointer
+	_selector.picker_toggled.connect(func(open: bool):
+		_dock.visible = not open)  # the surface picker uses the same spot
+
+
+func _on_food_dropped(kind: String, screen_pos: Vector2) -> void:
+	var world := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
+	# food only lands on the surface (a little leeway into the topsoil for fat fingers)
+	if world.y > SOIL_TOP + 24.0 or world.x < SURFACE_MARGIN or world.x > VIEW_SIZE.x - SURFACE_MARGIN:
+		return
+	_drop_food(kind, world.x)
+
+
+func _drop_food(kind: String, x: float, crumbs_left: int = -1) -> void:
+	var drops := _food_layer.get_children()
+	if drops.size() >= MAX_FOOD_DROPS:
+		drops[0].queue_free()  # the oldest pile is cleared away
+	var cluster := FoodClusterScript.new()
+	_food_layer.add_child(cluster)
+	cluster.setup(kind, Vector2(x, GROUND_Y), _spawn_rng.randi(), crumbs_left)
+	colony.add_cluster(cluster)
+
+
+func _food_save() -> Array:
+	var drops := []
+	for c in _food_layer.get_children():
+		if not c.is_queued_for_deletion() and not c.is_empty():
+			drops.append({"kind": c.kind, "x": c.position.x, "crumbs": c.crumbs})
+	return drops
+
+
+func _food_restore(saved: Dictionary) -> void:
+	for d: Dictionary in saved.get("food_drops", []):
+		_drop_food(d["kind"], float(d["x"]), int(d["crumbs"]))

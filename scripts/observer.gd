@@ -67,7 +67,13 @@ func _draw() -> void:
 	draw_arc(_followed.global_position, r, 0.0, TAU, 32, Color(1.0, 0.92, 0.7, 0.75), 1.0)
 
 
+var input_blocked := Callable()  # returns true while another control owns the pointer
+
+
 func _unhandled_input(event: InputEvent) -> void:
+	if input_blocked.is_valid() and input_blocked.call():
+		_touches.clear()
+		return
 	if event is InputEventScreenTouch:
 		_on_touch(event as InputEventScreenTouch)
 	elif event is InputEventScreenDrag:

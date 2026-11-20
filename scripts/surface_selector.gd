@@ -5,6 +5,7 @@ extends Control
 
 signal preview_requested(index: int)
 signal preset_locked(index: int)
+signal picker_toggled(open: bool)
 
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
 
@@ -92,12 +93,14 @@ func _open_picker() -> void:
 	_refresh_label()
 	_picker.visible = true
 	_fade_picker(1.0)
+	picker_toggled.emit(true)
 
 
 func _close_picker() -> void:
 	_open = false
 	_touch_active = false
 	_fade_picker(0.0)
+	picker_toggled.emit(false)
 
 
 func _fade_picker(target: float) -> void:

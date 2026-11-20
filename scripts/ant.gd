@@ -62,6 +62,8 @@ var _greet_left := 0.0
 var _greet_cooldown := 0.0
 var _trail: Node2D  # optional surface pheromone layer (has add_point)
 var _trail_clock := 0.0
+var _food_target: Node2D  # a food drop on the surface this ant is heading for
+var _harvest_left := -1.0
 var _task: Dictionary = {}
 var _task_stage := 0
 var _carried: Sprite2D
@@ -155,6 +157,10 @@ func describe() -> String:
 				parts.append("carrying food")
 	elif _greet_left > 0.0:
 		parts.append("touching antennae")
+	elif _harvest_left > 0.0:
+		parts.append("gathering food")
+	elif _food_target != null:
+		parts.append("heading for food")
 	elif state == State.FORAGE_SURFACE:
 		parts.append("foraging outside")
 	elif state == State.IDLE_CHAMBER and _tunnels.chamber_role(_current_node) == "rest":
@@ -258,6 +264,14 @@ func _next_job() -> void:
 		return
 	_update_role()
 	if _colony != null and _callow_left <= 0.0:
+		# recruited by a nestmate's trail to food on the surface
+		var recruit_chance := {Role.FORAGER: 0.9, Role.WORKER: 0.35, Role.GUARD: 0.2}
+		if _rng.randf() < float(recruit_chance.get(role, 0.0)):
+			var food := _colony.take_recruit()
+			if food != null:
+				_food_target = food
+				_travel_to(_tunnels.nearest_entrance(food.position.x))
+				return
 		var task := {}
 		match role:
 			Role.NURSE:
@@ -422,11 +436,16 @@ func _start_surface_trip() -> void:
 	_state_timer = _rng.randf_range(10.0, 24.0)
 	_pause_timer = 0.0
 	_path.append(Vector2(position.x, _ground_y - _half_height))
+	if _food_target != null and is_instance_valid(_food_target):
+		_state_timer = 60.0  # straight to the food, then home
+		_path.append(Vector2(_food_target.position.x + _rng.randf_range(-6.0, 6.0), _ground_y - _half_height))
 
 
 func _update_surface(delta: float) -> void:
 	_state_timer -= delta
 	if not _follow_path(delta):
+		return
+	if not _returning and _food_target != null and _update_harvest(delta):
 		return
 	if _returning:
 		_returning = false
@@ -445,7 +464,7 @@ func _update_surface(delta: float) -> void:
 			_leave_for_good()
 			return
 		_returning = true
-		if role == Role.FORAGER and _colony != null and _rng.randf() < 0.65:
+		if role == Role.FORAGER and _colony != null and _task.is_empty() and _rng.randf() < 0.65:
 			var find := _colony.forage_task()  # it found something worth carrying home
 			if not find.is_empty():
 				_hold(find["item"])
@@ -458,9 +477,45 @@ func _update_surface(delta: float) -> void:
 	_pause_timer -= delta
 	if _pause_timer <= 0.0:
 		_pause_timer = _rng.randf_range(0.3, 1.8)
+		var sensed: Node2D = _colony.sense_food(position.x) if _colony != null and role != Role.NURSE else null
+		if sensed != null:
+			_food_target = sensed  # caught the scent of something good
+			_state_timer = maxf(_state_timer, 40.0)
+			_path.append(Vector2(sensed.position.x + _rng.randf_range(-6.0, 6.0), _ground_y - _half_height))
+			return
 		var x := clampf(position.x + _rng.randf_range(-SURFACE_STEP, SURFACE_STEP),
 				_surface_x_range.x, _surface_x_range.y)
 		_path.append(Vector2(x, _ground_y - _half_height))
+
+
+## At the food: cut or drink for a moment, then take a crumb and head home.
+## Returns true while the ant is busy with it.
+func _update_harvest(delta: float) -> bool:
+	if not is_instance_valid(_food_target) or _food_target.is_empty():
+		_food_target = null
+		_harvest_left = -1.0
+		return false
+	if absf(position.x - _food_target.position.x) > 12.0:
+		_path.append(Vector2(_food_target.position.x + _rng.randf_range(-6.0, 6.0), _ground_y - _half_height))
+		return true
+	if _harvest_left < 0.0:
+		_harvest_left = _food_target.harvest_time() * _rng.randf_range(0.8, 1.3)
+		_facing_left = _food_target.position.x < position.x
+		_sprite.flip_h = _facing_left
+		_sprite.rotation = 0.0
+	_harvest_left -= delta
+	if _harvest_left > 0.0:
+		return true
+	_harvest_left = -1.0
+	var food := _food_target
+	_food_target = null
+	if food.take_crumb():
+		_colony.report_find(food)
+		var task := _colony.crumb_task(food.kind)
+		_hold(task["item"])
+		_task = task
+		_state_timer = 0.0  # head straight home with it
+	return false
 
 
 ## Walks off the edge of the world and is removed (colony turnover once it is full).
