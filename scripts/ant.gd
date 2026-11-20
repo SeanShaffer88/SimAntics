@@ -35,6 +35,7 @@ var state: State = State.IDLE_CHAMBER
 var role: Role = Role.WORKER
 var caste_name := ""
 var age := 0.0
+var lifespan := 3000.0  # seconds; workers live a few times longer than they took to develop
 
 var _tunnels: Tunnels
 var _colony: ColonyScript
@@ -129,6 +130,7 @@ func setup(tunnels: Tunnels, colony: ColonyScript, species: Dictionary, caste: D
 	_half_height = _frames[0].get_height() * ColonyArt.SPRITE_SCALE * 0.5
 	_half_width = _frames[0].get_width() * ColonyArt.SPRITE_SCALE * 0.5
 	_speed = BASE_SPEED * float(species["speed"]) * _rng.randf_range(0.85, 1.15)
+	lifespan = _rng.randf_range(1800.0, 3600.0) * (1.3 if float(caste["head"]) >= 1.5 else 1.0)
 	_current_node = start_node
 	if start_pos == Vector2.INF:
 		position = _tunnels.random_floor_point(start_node, _rng, _half_height)
@@ -152,7 +154,7 @@ func to_save() -> Dictionary:
 				home = id
 	return {"caste": _caste, "role": role, "age": age, "callow": _callow_left, "chamber": home,
 			"x": position.x if _tunnels.is_chamber(_current_node) else _tunnels.nodes[home].x,
-			"departing": _departing}
+			"departing": _departing, "lifespan": lifespan}
 
 
 ## Restores the callow tint and departure flag from a save.
@@ -179,6 +181,8 @@ func behavior_key() -> String:
 				return "midden" if _task.get("zone") == "midden" else "haul_waste"
 			"soil":
 				return "carry_soil"
+			"corpse":
+				return "necrophoresis"
 		return "hitchhiking" if _carried.has_meta("hitchhiker") else "carry_food"
 	if _greet_left > 0.0:
 		return "trophallaxis" if has_crop() else "antennation"
@@ -237,6 +241,8 @@ func describe() -> String:
 				parts.append("hauling waste")
 			"soil":
 				parts.append("carrying soil out")
+			"corpse":
+				parts.append("carrying a dead nestmate out")
 			_:
 				parts.append("carrying food")
 	elif _greet_left > 0.0:
@@ -475,6 +481,9 @@ func _next_job() -> void:
 		_start_idle()  # alates shuffle about their chamber and wait
 		return
 	_update_role()
+	if age > lifespan and _colony != null and _tunnels.is_chamber(_current_node):
+		_die()
+		return
 	if _colony != null and _callow_left <= 0.0:
 		# recruited by a nestmate's trail to food on the surface
 		var recruit_chance := {Role.FORAGER: 0.9, Role.WORKER: 0.35, Role.GUARD: 0.2}
@@ -763,8 +772,19 @@ func _update_idle(delta: float) -> void:
 		_sprite.rotation = sin(age * 6.0) * 0.1  # head working over the brood
 
 
+## Old age: the ant stops where it is and dies; nestmates will carry the body out.
+func _die() -> void:
+	if _attending:
+		_attending = false
+		_colony.leave_retinue()
+	_colony.ant_died(position, _current_node, _frames[0])
+	queue_free()
+
+
 func _start_surface_trip() -> void:
 	state = State.FORAGE_SURFACE
+	if age > lifespan * 0.92 and not _departing:
+		depart()  # most old foragers die out on a trip and never come home
 	_returning = false
 	_state_timer = _rng.randf_range(10.0, 24.0)
 	_pause_timer = 0.0
@@ -835,7 +855,7 @@ func _update_surface(delta: float) -> void:
 		_returning = true
 		# now and then a forager comes back with something small it found off-screen;
 		# most food comes from piles you can see
-		if role == Role.FORAGER and _colony != null and _task.is_empty() and _rng.randf() < 0.25:
+		if role == Role.FORAGER and _colony != null and _task.is_empty() and _rng.randf() < 0.45:
 			var find := _colony.forage_task()  # it found something worth carrying home
 			if not find.is_empty():
 				_hold(find["item"])

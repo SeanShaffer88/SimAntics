@@ -11,6 +11,8 @@ extends Node
 ## Times are compressed for watching: real development takes weeks.
 
 signal worker_emerged(position: Vector2, chamber: int)
+signal note(text: String, key: String)  # something worth a field note
+signal corpse_dumped(x: float, texture: Texture2D)  # a dead ant left outside on the midden
 
 const ColonyArt := preload("res://scripts/colony_art.gd")
 const Tunnels := preload("res://scripts/subterranean_layer.gd")
@@ -29,6 +31,9 @@ const MAX_LOOSE_WASTE := 40
 const MAX_REFUSE_ITEMS := 60
 const RESERVE_FEED_INTERVAL := 25.0  # how often a founding queen feeds a larva from her own body
 const DIG_TIME := Vector2(1.8, 2.8)  # seconds an ant spends chewing out one pellet of soil
+## What each food provides once stored.
+const NUTRIENTS := {"sugar": "sugar", "nectar": "sugar", "fruit": "sugar", "protein": "protein",
+		"insects": "protein", "seeds": "both", "leaves": "both"}
 const SMALL_COLONY := 10  # below this many workers the queen still feeds brood from her reserves
 
 
@@ -73,7 +78,7 @@ var _reserve_clock := RESERVE_FEED_INTERVAL
 var _upkeep_clock := 60.0
 
 const UPKEEP_INTERVAL := 60.0
-const WORKERS_PER_MEAL := 10  # each minute the adults eat one stored item per this many workers
+const WORKERS_PER_MEAL := 14  # each minute the adults eat one stored item per this many workers
 
 
 ## The adults eat too: each minute a little stored food is used up, leaving waste.
@@ -87,13 +92,78 @@ func _eat_from_stores() -> void:
 				stores.append(id)
 		if stores.is_empty():
 			return
-		var store: int = stores[_rng.randi() % stores.size()]
-		var item: Sprite2D = (_tunnels.food_items[store] as Array).pop_back()
+		# adult workers run on sugars; they turn to protein only when sugars are gone
+		var taken := _take_stored(["sugar", "both"])
+		if taken.is_empty():
+			taken = _take_stored(["protein"])
+			if taken.is_empty():
+				return
+			count("ate_protein")
+			if population >= SMALL_COLONY:
+				note.emit("The sugar stores ran out, so the workers are eating protein instead. Sugary food keeps them going.", "no_sugar")
+		var item: Sprite2D = taken["item"]
 		var at := item.position
 		item.queue_free()
 		count("eaten")
-		_leave_waste(store, at)
+		_leave_waste(taken["store"], at)
 var _dig_claims: Dictionary = {}  # node being dug into -> ants digging it
+var _eggs_since_meal := 0
+var _clock := 0.0
+var _corpses: Array[Dictionary] = []  # dead nestmates waiting to be carried out: sprite, chamber, ready
+
+const EGGS_PER_PROTEIN := 3  # her attendants feed her one protein item for every few eggs
+
+
+## Egg production runs on protein. A founding queen lives off her own body; after that
+## her attendants feed her from the stores, and with no protein she stops laying.
+func _queen_fed() -> bool:
+	if population < SMALL_COLONY or _species["food"] == "fungus":
+		return true  # claustral reserves, or the fungus garden feeds her
+	if _eggs_since_meal < EGGS_PER_PROTEIN:
+		_eggs_since_meal += 1
+		return true
+	var taken := _take_stored(["protein", "both"])
+	if taken.is_empty():
+		count("lay_skipped")
+		note.emit("The queen stopped laying: there is no protein in the stores. Dead insects or seeds will start her again.", "queen_no_protein")
+		return false
+	var item: Sprite2D = taken["item"]
+	item.queue_free()
+	_eggs_since_meal = 1
+	return true
+
+
+## A worker died of old age in the nest. Its body lies where it fell until the smell of
+## decay (oleic acid) builds up, then a nestmate carries it to the refuse pile.
+func ant_died(at: Vector2, chamber: int, texture: Texture2D) -> void:
+	count("died")
+	var floor_y := _tunnels.chamber_floor_y(chamber) if _tunnels.is_chamber(chamber) else at.y + 4.0
+	var body := _tunnels.add_item(texture, Vector2(at.x, floor_y), "corpse", 1)
+	body.flip_v = true  # on its back, legs curled
+	body.modulate = Color(0.55, 0.5, 0.48)
+	_corpses.append({"sprite": body, "chamber": chamber, "ready": _clock + _rng.randf_range(20.0, 45.0)})
+	note.emit("A worker died of old age. Its nestmates left the body for a while, then carried it to the refuse pile.", "first_death")
+
+
+## A body that has started to smell, ready to be carried out, as a waste task (or {}).
+func _corpse_task() -> Dictionary:
+	for i in _corpses.size():
+		var c: Dictionary = _corpses[i]
+		var body: Sprite2D = c["sprite"]
+		if not is_instance_valid(body):
+			_corpses.remove_at(i)
+			return {}
+		if _clock < float(c["ready"]) or not _tunnels.is_chamber(int(c["chamber"])):
+			continue
+		_corpses.remove_at(i)
+		var midden: bool = _species["id"] == "harvester"
+		var dumps := _tunnels.chambers_with_role("refuse")
+		if dumps.is_empty() and not midden:
+			midden = true  # no graveyard chamber yet: out it goes
+		var drop: int = _tunnels.nearest_entrance(body.position.x) if midden else dumps[0]
+		return {"type": "waste", "item": body, "pickup_node": int(c["chamber"]), "pickup_pos": body.position,
+				"drop_node": drop, "zone": "midden" if midden else "refuse"}
+	return {}
 var _retinue := 0  # nurses currently attending the queen
 
 const RETINUE_SIZE := 4
@@ -334,6 +404,7 @@ func _refresh_texture(b: Brood) -> void:
 func _process(delta: float) -> void:
 	if _tunnels == null:
 		return
+	_clock += delta
 	_lay_timer -= delta
 	if _lay_timer <= 0.0:
 		# A full colony keeps raising brood at half pace; old foragers leaving keeps its size steady.
@@ -343,9 +414,10 @@ func _process(delta: float) -> void:
 		# larvae the nurses feed her less and she lays less. In winter she rests.
 		if not winter and _count_in_zone("queen_eggs") < MAX_QUEEN_EGGS and brood.size() < MAX_BROOD \
 				and _hungry_larvae() < 16:
-			_add_brood(Stage.EGG, _tunnels.queen_chamber(), "queen_eggs", 0.0)
-			count("laid")
-			_tunnels.queen_lay_pulse()
+			if _queen_fed():
+				_add_brood(Stage.EGG, _tunnels.queen_chamber(), "queen_eggs", 0.0)
+				count("laid")
+				_tunnels.queen_lay_pulse()
 
 	_reserve_clock -= delta
 	if _reserve_clock <= 0.0:
@@ -473,22 +545,65 @@ func _food_source() -> Dictionary:
 			return {}
 		var g: int = gardens[_rng.randi() % gardens.size()]
 		return {"pickup_node": g, "pickup_pos": _tunnels.zone_spot(g, "")}
-	var stores: Array[int] = []
+	# larvae grow on protein; a larva given only sugar is kept alive but does not develop
+	var taken := _take_stored(["protein", "both"])
+	var sugar_only := false
+	if taken.is_empty():
+		taken = _take_stored(["sugar"])
+		sugar_only = true
+		if taken.is_empty():
+			return {}
+	var item: Sprite2D = taken["item"]
+	return {"pickup_node": taken["store"], "pickup_pos": item.position, "food": item, "sugar_only": sugar_only}
+
+
+## What a stored food item is worth to the colony: "sugar", "protein" or "both".
+func _nutrient(item: Sprite2D) -> String:
+	if item.has_meta("nutrient"):
+		return item.get_meta("nutrient")
+	return "protein" if _species["food"] == "prey" else "both"  # seeds hold starch and protein
+
+
+## Takes a stored item of one of the given nutrient kinds from the top of any store.
+## Returns {"store", "item"} or {}.
+func _take_stored(kinds: Array) -> Dictionary:
+	var options: Array[Dictionary] = []
 	for id: int in _tunnels.food_items:
-		if not (_tunnels.food_items[id] as Array).is_empty():
-			stores.append(id)
-	if stores.is_empty():
+		var items: Array = _tunnels.food_items[id]
+		for i in range(items.size() - 1, -1, -1):
+			if kinds.has(_nutrient(items[i])):
+				options.append({"store": id, "index": i})
+				break
+	if options.is_empty():
 		return {}
-	var store: int = stores[_rng.randi() % stores.size()]
-	var items: Array = _tunnels.food_items[store]
-	var item: Sprite2D = items.pop_back()  # take from the top of the heap
-	return {"pickup_node": store, "pickup_pos": item.position, "food": item}
+	var pick: Dictionary = options[_rng.randi() % options.size()]
+	var items: Array = _tunnels.food_items[pick["store"]]
+	var item: Sprite2D = items[pick["index"]]
+	items.remove_at(pick["index"])
+	return {"store": pick["store"], "item": item}
+
+
+## Stored food, counted by what it provides: x = sugars, y = protein (seeds count for both).
+func store_counts() -> Vector2i:
+	var out := Vector2i.ZERO
+	for id: int in _tunnels.food_items:
+		for item: Sprite2D in _tunnels.food_items[id]:
+			var n := _nutrient(item)
+			if n != "protein":
+				out.x += 1
+			if n != "sugar":
+				out.y += 1
+	return out
 
 
 ## Offers a nest worker a job hauling waste to the refuse chamber.
 func waste_task() -> Dictionary:
 	# Harvester ants carry seed chaff out and dump it on a midden beside the nest
 	# mound; other species keep refuse in a chamber away from the brood.
+	var corpse := _corpse_task()
+	if not corpse.is_empty():
+		count("necrophoresis")
+		return corpse
 	var midden: bool = _species["id"] == "harvester"
 	var dumps := _tunnels.chambers_with_role("refuse")
 	if _waste.is_empty() or (dumps.is_empty() and not midden):
@@ -510,6 +625,11 @@ func forage_task() -> Dictionary:
 	if targets.is_empty():
 		return {}
 	var target: int = targets[_rng.randi() % targets.size()]
+	if _species["food"] == "prey" and _rng.randf() < 0.45:
+		# insect hunters are omnivores too: they also bring home honeydew and nectar
+		var drop := _tunnels.add_item(ColonyArt.food_crumb("nectar", 0), Vector2.ZERO, "food")
+		drop.set_meta("nutrient", "sugar")
+		return {"type": "store", "item": drop, "drop_node": target, "zone": "food"}
 	var item := _tunnels.add_item(_tunnels.food_texture(_species), Vector2.ZERO, "food")
 	return {"type": "store", "item": item, "drop_node": target, "zone": "food"}
 
@@ -591,13 +711,21 @@ func drop(task: Dictionary, carried: Sprite2D, at: Vector2) -> void:
 			carried.queue_free()
 			b.reserved = false
 			if brood.has(b) and b.stage == Stage.LARVA:
-				b.fed += 1
-				_refresh_texture(b)
+				if task.get("sugar_only", false):
+					count("sugar_fed")  # keeps it alive, but larvae need protein to grow
+					if population >= SMALL_COLONY:
+						note.emit("Protein ran short: nurses fed the larvae sugar, which keeps them alive but they stopped growing. Insects and seeds are protein.", "larvae_no_protein")
+				else:
+					b.fed += 1
+					_refresh_texture(b)
 			_leave_waste(b.chamber, at)
 		"waste":
 			if task["zone"] == "midden":
+				if str(carried.get_meta("kind", "")) == "corpse":
+					corpse_dumped.emit(at.x, carried.texture)
+				else:
+					midden_dumped.emit(at.x)
 				carried.queue_free()
-				midden_dumped.emit(at.x)
 				return
 			_tunnels.place_item(carried, at)
 			_refuse.append(carried)
@@ -821,6 +949,7 @@ func crumb_task(kind: String) -> Dictionary:
 		_:
 			tex = ColonyArt.food_crumb(kind, _rng.randi_range(0, 2))
 	var item := _tunnels.add_item(tex, Vector2.ZERO, "food")
+	item.set_meta("nutrient", NUTRIENTS.get(kind, "both"))
 	if kind == "leaves" and _species["id"] == "leafcutter" and _rng.randf() < 0.3:
 		# a tiny minima rides on the leaf, guarding the carrier from parasitic flies
 		var rider := Sprite2D.new()

@@ -102,6 +102,7 @@ func _ready() -> void:
 	_spoil.restore(saved.get("spoil", {}))
 	colony.soil_dumped.connect(_spoil.add)
 	colony.midden_dumped.connect(_spoil.add_chaff)
+	colony.corpse_dumped.connect(_on_corpse_dumped)
 	_subterranean.entrance_opened.connect(func(x: float):
 		_spoil.add_hole(x)
 		for i in 10:
@@ -499,6 +500,7 @@ func _restore_ants(saved: Dictionary) -> void:
 		var ant := _spawn_ant(entry["caste"], int(entry["role"]), chamber, float(entry["age"]),
 				Vector2(float(entry["x"]), 0.0))
 		ant.restore_extras(float(entry.get("callow", 0.0)), bool(entry.get("departing", false)))
+		ant.lifespan = float(entry.get("lifespan", ant.lifespan))
 
 
 ## Plays out the time the app was closed. Returns a short "while you were away" line.
@@ -818,7 +820,7 @@ func _colony_stats() -> Dictionary:
 		"alates": ("  ·  %d winged alates" % alates) if alates > 0 else "",
 		"roles": roles,
 		"brood": brood,
-		"food": food,
+		"food": [food, colony.store_counts().x, colony.store_counts().y],
 		"nest": [roundi(100.0 * dug / maxi(1, _subterranean.dug.size())), open_chambers, _subterranean.chambers.size()],
 		"guide": [notes.count_prefix("seen_"), _guide_total()],
 	}
@@ -932,6 +934,7 @@ const POPULATION_MARKS := [10, 25, 40, 60]
 func _hook_field_notes(founding: bool) -> void:
 	if founding:
 		notes.note("A mated queen sealed herself into a small chamber below the surface, with her first brood and a few workers.", "founded")
+	colony.note.connect(func(text: String, key: String): notes.note(text, key))
 	colony.worker_emerged.connect(func(_pos: Vector2, _chamber: int):
 		notes.note("The first new worker emerged, pale and soft.", "first_worker"))
 	_subterranean.chamber_opened.connect(func(id: int):
@@ -1038,6 +1041,7 @@ const BEHAVIORS := {
 	"skirmish": ["Border war", "Pavement ants grappled with a rival colony to settle their territory."],
 	"eclosion": ["Helping out", "A nurse helped a new worker out of its pupal case."],
 	"mobbing": ["Mobbing", "Workers swarmed a wolf spider, biting its legs until it fled."],
+	"necrophoresis": ["Necrophoresis", "A worker carried a dead nestmate to the refuse pile, as ants do once a body starts to smell."],
 	"drinking": ["Drinking", "A forager drank from a raindrop on the grass and carried the water home."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
@@ -1082,6 +1086,30 @@ func _guide_total() -> int:
 		if SPECIES_BEHAVIORS.get(key, profile.species["id"]) == profile.species["id"]:
 			total += 1
 	return total
+
+
+var _remains: Node2D  # bodies carried out onto the midden
+
+
+## Harvester ants leave their dead on the midden outside, among the seed husks.
+func _on_corpse_dumped(x: float, texture: Texture2D) -> void:
+	if _remains == null:
+		_remains = Node2D.new()
+		_remains.name = "Remains"
+		add_child(_remains)
+		move_child(_remains, _ants.get_index())
+	var body := Sprite2D.new()
+	body.texture = texture
+	body.flip_v = true
+	body.modulate = Color(0.5, 0.46, 0.44)
+	body.position = Vector2(roundf(x + _spawn_rng.randf_range(-6.0, 6.0)), GROUND_Y - texture.get_height() * 0.5 + 1.0)
+	_remains.add_child(body)
+	if _remains.get_child_count() > 8:
+		_remains.get_child(0).queue_free()  # older remains break down
+	var fade := body.create_tween()
+	fade.tween_interval(240.0)
+	fade.tween_property(body, "modulate:a", 0.0, 20.0)
+	fade.tween_callback(body.queue_free)
 
 
 const SpiderScript := preload("res://scripts/spider.gd")

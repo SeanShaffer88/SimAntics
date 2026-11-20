@@ -8,6 +8,8 @@ A passive, observational ant-farm simulation for Android, built in Godot 4.7.2 (
 - **A root-like nest.** Winding galleries run down from two or three mound entrances; side branches end in small rounded chambers, and galleries that meet join into loops.
 - **A growing nest.** Once every planned room is dug, a colony of 15+ workers keeps extending its galleries and rooms (up to 8 times).
 - **Rain.** Showers darken the topsoil, which dries over time; damp soil is quicker to dig, and foragers drink the drops left on the grass.
+- **Nutrition.** Stored food is sugary (sugar, nectar, fruit), protein (ladybugs, insects) or both (seeds, leaves). Workers live on sugars; larvae only grow on protein, and the queen needs protein to lay. What you feed shapes how the colony grows.
+- **Life and death.** Workers live a few times longer than they took to develop. Old foragers die out on a trip; ants that die in the nest are left until they start to smell, then carried to the refuse pile (harvesters leave them on the midden outside).
 - **Founding and digging.** A new colony starts as a founding queen, her first brood and four workers in one small chamber. Workers dig the rest of the nest out over time:
   - Each soil pellet they carry out lands on a growing mound.
   - Chambers widen as they're dug.

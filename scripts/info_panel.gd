@@ -153,7 +153,7 @@ func _update() -> void:
 	_rows["workers"].text = "%d workers  ·  queen%s" % [s["workers"], s["alates"]]
 	_rows["roles"].text = "%d nurses, %d nest workers, %d foragers, %d guards" % s["roles"]
 	_rows["brood"].text = "Brood: %d eggs, %d larvae, %d pupae" % s["brood"]
-	_rows["food"].text = "Food stored: %d" % s["food"]
+	_rows["food"].text = "Food stored: %d  ·  %d sugary, %d with protein" % s["food"]
 	_rows["nest"].text = "Nest dug: %d%%  ·  %d of %d chambers open" % s["nest"]
 	_rows["guide"].text = "Behaviours observed: %d of %d  (tap ants to discover more)" % s["guide"]
 	_graph.queue_redraw()
