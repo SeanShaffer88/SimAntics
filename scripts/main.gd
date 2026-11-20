@@ -14,6 +14,8 @@ const DayNightScript := preload("res://scripts/day_night.gd")
 const TrailLayerScript := preload("res://scripts/trail_layer.gd")
 const AmbienceScript := preload("res://scripts/ambience.gd")
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
+const ColonyArt := preload("res://scripts/colony_art.gd")
+const DustLayerScript := preload("res://scripts/dust_layer.gd")
 const GREET_CHECK := 0.3  # seconds between checks for ants meeting head-on
 const SaveGame := preload("res://scripts/save_game.gd")
 const FoodClusterScript := preload("res://scripts/food_cluster.gd")
@@ -42,6 +44,7 @@ var colony: ColonyScript
 var _spawn_rng := RandomNumberGenerator.new()
 var _spawned := 0
 var _trail: TrailLayerScript
+var _dust: Node2D
 var _day_night: DayNightScript
 var _ambience: AmbienceScript
 var _greet_clock := 0.0
@@ -163,7 +166,24 @@ func _check_greetings() -> void:
 			if a.global_position.distance_squared_to(b.global_position) < 81.0 and _spawn_rng.randf() < 0.5:
 				if a.greet(b.global_position):
 					b.greet(a.global_position)
+					if a.has_crop() != b.has_crop():
+						_share_food(a, b)
 				break
+
+
+## Trophallaxis: the ant with a full crop passes a droplet of food mouth to mouth.
+func _share_food(a: Node2D, b: Node2D) -> void:
+	var receiver := b if a.has_crop() else a
+	receiver.fill_crop()
+	var drop := Sprite2D.new()
+	drop.texture = ColonyArt.food_crumb("nectar", 0)
+	drop.position = ((a.global_position + b.global_position) * 0.5).round() + Vector2(0.0, -1.0)
+	drop.z_index = 2
+	add_child(drop)
+	var fade := drop.create_tween()
+	fade.tween_property(drop, "scale", Vector2.ONE * 0.4, 0.9)
+	fade.parallel().tween_property(drop, "modulate:a", 0.0, 0.9)
+	fade.tween_callback(drop.queue_free)
 
 
 ## Camera, inspect label, day/night, scent trails, lamp vignette, sound and its mute button.
@@ -178,6 +198,12 @@ func _build_ambiance() -> void:
 	_trail.name = "Trails"
 	add_child(_trail)
 	move_child(_trail, _ants.get_index())  # just under the ants
+
+	_dust = DustLayerScript.new()
+	_dust.name = "Dust"
+	add_child(_dust)
+	move_child(_dust, _ants.get_index() + 1)  # over the ants that kick it up
+	_dust.setup(profile.soil["strata"][1], profile.seed_value)
 
 	var camera := Camera2D.new()
 	camera.name = "Camera"
@@ -313,6 +339,7 @@ func _spawn_ant(caste: Dictionary, role: AntScript.Role, start_node: int, start_
 			Vector2(SURFACE_MARGIN, VIEW_SIZE.x - SURFACE_MARGIN), profile.seed_value * 31 + _spawned,
 			start_age, start_pos)
 	ant.set_trail_layer(_trail)
+	ant.set_dust_layer(_dust)
 	_spawned += 1
 	return ant
 

@@ -68,10 +68,44 @@ var _waste: Array[Sprite2D] = []  # loose waste waiting to be hauled
 var _waste_chamber: Dictionary = {}  # sprite instance id -> chamber id
 var _refuse: Array[Sprite2D] = []  # waste already dumped on the refuse heap
 var _reserve_clock := RESERVE_FEED_INTERVAL
+var _upkeep_clock := 60.0
+
+const UPKEEP_INTERVAL := 60.0
+const WORKERS_PER_MEAL := 10  # each minute the adults eat one stored item per this many workers
+
+
+## The adults eat too: each minute a little stored food is used up, leaving waste.
+## Stores therefore shrink unless foragers (or the player) keep bringing food in.
+func _eat_from_stores() -> void:
+	var meals := population / WORKERS_PER_MEAL
+	for m in meals:
+		var stores: Array[int] = []
+		for id: int in _tunnels.food_items:
+			if not (_tunnels.food_items[id] as Array).is_empty():
+				stores.append(id)
+		if stores.is_empty():
+			return
+		var store: int = stores[_rng.randi() % stores.size()]
+		var item: Sprite2D = (_tunnels.food_items[store] as Array).pop_back()
+		var at := item.position
+		item.queue_free()
+		count("eaten")
+		_leave_waste(store, at)
 var _dig_claims: Dictionary = {}  # node being dug into -> ants digging it
 var _retinue := 0  # nurses currently attending the queen
 
 const RETINUE_SIZE := 4
+
+
+## Where a resting item of brood lies in a chamber (for an idle nurse to groom), or INF.
+func brood_position_in(chamber: int) -> Vector2:
+	var here: Array[Brood] = []
+	for b in brood:
+		if b.chamber == chamber and not b.carried:
+			here.append(b)
+	if here.is_empty():
+		return Vector2.INF
+	return here[_rng.randi() % here.size()].sprite.position
 
 
 ## A nurse in the queen's chamber asks to join her retinue of attendants.
@@ -237,6 +271,10 @@ func _process(delta: float) -> void:
 	if _reserve_clock <= 0.0:
 		_reserve_clock = RESERVE_FEED_INTERVAL * (0.4 if population < SMALL_COLONY else 1.0)
 		_feed_from_reserves()
+	_upkeep_clock -= delta
+	if _upkeep_clock <= 0.0:
+		_upkeep_clock = UPKEEP_INTERVAL
+		_eat_from_stores()
 
 	for b in brood.duplicate():
 		b.age += delta

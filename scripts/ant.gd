@@ -62,6 +62,7 @@ var _multi_caste := false
 var _greet_left := 0.0
 var _greet_cooldown := 0.0
 var _trail: Node2D  # optional surface pheromone layer (has add_point)
+var _dust: Node2D  # optional digging dust layer (has puff)
 var _trail_clock := 0.0
 var _food_target: Node2D  # a food drop on the surface this ant is heading for
 var _harvest_left := -1.0
@@ -69,6 +70,19 @@ var _snatched := false
 var _dig_left := -1.0  # seconds of digging left at the soil face (-1 when not digging)
 var _nuptial := false  # a winged alate heading out on its mating flight
 var _attending := false  # one of the queen's attendants right now
+var _crop_left := 0.0  # seconds this ant still has liquid food in its crop to share
+var _tend_x := INF  # x of the brood item an idle nurse is grooming
+
+const CROP_TIME := 150.0
+
+
+## Food in the crop (from feeding at a food drop, delivering food, or a nestmate).
+func has_crop() -> bool:
+	return _crop_left > 0.0
+
+
+func fill_crop() -> void:
+	_crop_left = CROP_TIME
 var _fly_velocity := Vector2.ZERO
 var _fly_clock := 0.0
 var _task: Dictionary = {}
@@ -165,11 +179,13 @@ func describe() -> String:
 			_:
 				parts.append("carrying food")
 	elif _greet_left > 0.0:
-		parts.append("touching antennae")
+		parts.append("sharing food" if has_crop() else "touching antennae")
 	elif _attending:
 		parts.append("attending the queen")
 	elif _dig_left > 0.0:
 		parts.append("digging")
+	elif _tend_x != INF and state == State.IDLE_CHAMBER:
+		parts.append("tending the brood")
 	elif _harvest_left > 0.0:
 		parts.append("gathering food")
 	elif _food_target != null:
@@ -270,6 +286,7 @@ func _process(delta: float) -> void:
 		_callow_left -= delta
 		_sprite.modulate = Color.WHITE.lerp(CALLOW_TINT, clampf(_callow_left / CALLOW_TIME, 0.0, 1.0))
 	_greet_cooldown -= delta
+	_crop_left -= delta
 	# above ground the ant shares the sky's light; underground the farm lamp is steady
 	modulate = _colony.surface_tint if _colony != null and position.y < _ground_y + 2.0 else Color.WHITE
 	if _greet_left > 0.0:
@@ -296,6 +313,9 @@ func _process(delta: float) -> void:
 					_frame_clock = 0.0
 					_frame = (_frame + 1) % _frames.size()
 					_sprite.texture = _frames[_frame]
+					if _dust != null:  # specks of soil fly off the face
+						var ahead := Vector2(-1.0 if _facing_left else 1.0, 0.0).rotated(_sprite.rotation)
+						_dust.puff(position + ahead * _half_width, -ahead)
 				if _dig_left == 0.0:
 					_advance_task()
 			elif _follow_path(delta):
@@ -321,6 +341,10 @@ func _process(delta: float) -> void:
 
 func set_trail_layer(layer: Node2D) -> void:
 	_trail = layer
+
+
+func set_dust_layer(layer: Node2D) -> void:
+	_dust = layer
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +479,8 @@ func _advance_task() -> void:
 		3:  # put it down
 			var item := _carried
 			_carried = null
+			if _task["type"] == "store":
+				fill_crop()  # foragers come home with a full crop to share
 			_colony.drop(_task, item, _task["drop_pos"])
 			_finish_task()
 
@@ -529,6 +555,7 @@ func _arrive() -> void:
 func _start_idle() -> void:
 	state = State.IDLE_CHAMBER
 	_pause_timer = 0.0
+	_tend_x = INF
 	if role == Role.NURSE and _current_node == _tunnels.queen_chamber() and _colony != null \
 			and _callow_left <= 0.0 and _colony.join_retinue():
 		# one of the queen's attendants: stand beside her, facing her, grooming and feeding
@@ -567,8 +594,24 @@ func _update_idle(delta: float) -> void:
 	if _pause_timer <= 0.0:
 		var resting := _tunnels.chamber_role(_current_node) == "rest"
 		_pause_timer = _rng.randf_range(4.0, 12.0) if resting else _rng.randf_range(0.6, 3.0)
+		_tend_x = INF
+		if role == Role.NURSE and _colony != null and _rng.randf() < 0.75:
+			# idle nurses groom and lick the brood: go to one and work over it
+			var brood_at: Vector2 = _colony.brood_position_in(_current_node)
+			if brood_at != Vector2.INF:
+				_tend_x = brood_at.x
+				_pause_timer = _rng.randf_range(2.5, 6.0)
+				_path.append(Vector2(brood_at.x + _rng.randf_range(-7.0, 7.0),
+						_tunnels.chamber_floor_y(_current_node) - _half_height))
+				return
 		if _tunnels.is_chamber(_current_node) and _rng.randf() < (0.3 if resting else 0.65):
 			_path.append(_tunnels.random_floor_point(_current_node, _rng, _half_height))
+	elif _tend_x != INF:
+		var dx := _tend_x - position.x
+		if absf(dx) > 0.5 and (dx < 0.0) != _facing_left:
+			_facing_left = dx < 0.0
+			_sprite.flip_h = _facing_left
+		_sprite.rotation = sin(age * 6.0) * 0.1  # head working over the brood
 
 
 func _start_surface_trip() -> void:
@@ -657,6 +700,7 @@ func _update_harvest(delta: float) -> bool:
 	var food := _food_target
 	_food_target = null
 	if food.take_crumb():
+		fill_crop()  # it drank or nibbled while gathering
 		_colony.report_find(food)
 		var task := _colony.crumb_task(food.kind)
 		_hold(task["item"])
