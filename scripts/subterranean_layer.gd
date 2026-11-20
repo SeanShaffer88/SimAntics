@@ -394,6 +394,29 @@ func _blueprint_path(from_id: int, to_id: int) -> Array[int]:
 	return route
 
 
+## True where there is soil (not dug out) at a point below ground.
+func is_solid(world: Vector2) -> bool:
+	if world.y < _soil_top:
+		return false
+	var a := _to_art(world)
+	var ix := int(a.x)
+	var iy := int(a.y)
+	if ix < 0 or iy < 0 or ix >= _art_size.x or iy >= _art_size.y:
+		return true
+	return _mask[iy * _art_size.x + ix] == 0
+
+
+## The open-air point just inside the wall, marching out from `from` along `dir`, kept
+## `inset` px clear of the soil (for an ant to cling to). Returns `from` if nothing found.
+func wall_point(from: Vector2, dir: Vector2, inset: float, max_dist: float = 80.0) -> Vector2:
+	var d := 0.0
+	while d < max_dist:
+		if is_solid(from + dir * d):
+			return from + dir * maxf(d - inset, 0.0)
+		d += 1.0
+	return from
+
+
 func _to_art(p: Vector2) -> Vector2:
 	var px := float(SoilArt.PIXEL_SCALE)
 	return Vector2(p.x / px, (p.y - _soil_top) / px)
@@ -528,7 +551,8 @@ func zone_spot(id: int, zone: String, ring: float = 0.0) -> Vector2:
 	match zone:
 		"queen_eggs":
 			center = _queen.position.x - _queen.texture.get_width() * 0.5 - 10.0
-			half = 10.0
+			half = minf(10.0, span * 0.2)
+			center = clampf(center, left + half, maxf(right - half, left + half))
 			height = minf(height, 9.0)
 		"eggs":  # a tight, sticky clump in the middle of the brood pile
 			half = span * 0.07
@@ -611,7 +635,13 @@ func _move_queen(id: int) -> void:
 
 func _set_queen_position(id: int) -> void:
 	var c: Dictionary = chambers[id]
-	var x := (float(c["floor_left"]) + float(c["floor_right"])) * 0.5 + 10.0
+	var half_w := _queen.texture.get_width() * ColonyArt.SPRITE_SCALE * 0.5
+	var left := float(c["floor_left"]) + half_w
+	var right := float(c["floor_right"]) - half_w
+	# a little off-centre where there is room, leaving space for her eggs beside her
+	var x := clampf((float(c["floor_left"]) + float(c["floor_right"])) * 0.5 + 10.0, minf(left, right), maxf(left, right))
+	if left > right:
+		x = (float(c["floor_left"]) + float(c["floor_right"])) * 0.5  # a tight room: in the middle
 	_queen.position = Vector2(x, chamber_floor_y(id) - _queen.texture.get_height() * ColonyArt.SPRITE_SCALE * 0.5)
 
 
@@ -620,7 +650,9 @@ func _set_queen_position(id: int) -> void:
 func queen_attend_spot(rng: RandomNumberGenerator, half_height: float) -> Vector2:
 	var side := -1.0 if rng.randf() < 0.5 else 1.0
 	var reach := _queen.texture.get_width() * ColonyArt.SPRITE_SCALE * 0.5 + rng.randf_range(4.0, 12.0)
-	return Vector2(_queen.position.x + side * reach, chamber_floor_y(queen_chamber()) - half_height)
+	var c: Dictionary = chambers[queen_chamber()]
+	var x := clampf(_queen.position.x + side * reach, float(c["floor_left"]) + 3.0, float(c["floor_right"]) - 3.0)
+	return Vector2(x, chamber_floor_y(queen_chamber()) - half_height)
 
 
 func queen_position() -> Vector2:

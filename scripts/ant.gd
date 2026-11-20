@@ -76,6 +76,11 @@ var _crop_left := 0.0  # seconds this ant still has liquid food in its crop to s
 var _tend_x := INF  # x of the brood item an idle nurse is grooming (or the seed a major mills)
 var _milling := false  # a big-headed major cracking seeds in a granary
 var _helping := false  # a nurse helping a new adult out of its cocoon
+var _lane := 1.0  # which side of a gallery this trip uses: 1 floor/one wall, -1 ceiling/other wall
+var _wall := Vector2.DOWN  # direction of the surface the ant's feet are on
+var _wall_clock := 0.0
+var _on_wall := false  # resting up on a chamber wall or ceiling
+var _wall_route: Array[Vector2] = []  # the way back down from it
 var _aphid_left := -1.0  # seconds left tending aphids on the surface (black garden ants)
 var _to_aphids := false
 var _groom_left := 0.0  # seconds of grooming left (self-grooming or grooming a nestmate)
@@ -300,7 +305,7 @@ func greet(other_pos: Vector2) -> bool:
 
 ## True when this ant is idling in a chamber and free to groom or be groomed.
 func can_allogroom() -> bool:
-	return state == State.IDLE_CHAMBER and _path.is_empty() and not _attending and _tend_x == INF \
+	return state == State.IDLE_CHAMBER and _path.is_empty() and not _attending and _tend_x == INF and not _on_wall \
 			and _greet_left <= 0.0 and _groom_left <= 0.0 and _carried == null and role != Role.ALATE \
 			and _tunnels.is_chamber(_current_node)
 
@@ -452,9 +457,11 @@ func _process(delta: float) -> void:
 			_update_flight(delta)
 			return
 	_animate(delta)
+	_cling(delta)
 	if _carried != null:
-		# held in the mandibles, just ahead of the head
-		var ahead := Vector2((-1.0 if _facing_left else 1.0) * (_half_width + 1.0), _half_height * 0.4)
+		# held in the mandibles, just ahead of the head (below it, from the ant's point of view)
+		var ahead := Vector2((-1.0 if _facing_left else 1.0) * (_half_width + 1.0),
+				_half_height * (-0.4 if _sprite.flip_v else 0.4))
 		_carried.position = ahead.rotated(_sprite.rotation)
 		# foragers bringing food home lay a scent trail for nestmates to follow
 		if _trail != null and _moving and position.y < _ground_y and _task.get("type") == "store":
@@ -673,6 +680,11 @@ func _travel_to(goal: int) -> void:
 		return
 	_goal_node = goal
 	_path.clear()
+	if _on_wall:  # climb back down first
+		_path.append_array(_wall_route)
+		_on_wall = false
+	var roll := _rng.randf()
+	_lane = (1.0 if roll < 0.45 else (-1.0 if roll < 0.9 else 0.0)) * _rng.randf_range(0.7, 1.0)
 	for id in route:
 		_path.append(_walk_point(id))
 	state = State.PATROL_TUNNEL
@@ -686,7 +698,20 @@ func _walk_point(id: int) -> Vector2:
 		return Vector2(p.x, _tunnels.chamber_floor_y(id) - _half_height)
 	if _tunnels.is_entrance(id):
 		return p
-	return p + Vector2(0.0, GALLERY_FLOOR_OFFSET)
+	# Galleries: walk on one side (floor, wall or ceiling) for this trip. Ants cling to
+	# any surface, so traffic spreads over the whole tube instead of a single file.
+	var nbs: Array = _tunnels.links[id]
+	if nbs.size() < 2 or absf(_lane) < 0.01:
+		return p + Vector2(0.0, GALLERY_FLOOR_OFFSET if absf(_lane) > 0.01 else 0.0)
+	var along: Vector2 = (_tunnels.nodes[nbs[1]] - _tunnels.nodes[nbs[0]])
+	if along.length_squared() < 0.01:
+		return p + Vector2(0.0, GALLERY_FLOOR_OFFSET)
+	var n := along.orthogonal().normalized()
+	if absf(n.y) > 0.35:
+		n = n if n.y > 0.0 else -n  # +1 lane: the floor of a sloping or level gallery
+	else:
+		n = n if n.x > 0.0 else -n  # in a shaft: the right-hand wall
+	return p + n * _lane * clampf(6.0 - _half_height, 1.0, 4.0)
 
 
 func _arrive() -> void:
@@ -719,7 +744,11 @@ func _start_idle() -> void:
 		_state_timer = _rng.randf_range(15.0, 40.0) if resting else _rng.randf_range(5.0, 15.0)
 		if _colony != null and _colony.winter:
 			_state_timer *= 2.5  # torpid in the cold: long rests
-		_path.append(_tunnels.random_floor_point(_current_node, _rng, _half_height))
+		if role in [Role.WORKER, Role.FORAGER, Role.GUARD] and _callow_left <= 0.0 \
+				and _tunnels.chamber_role(_current_node) != "queen" and _rng.randf() < (0.4 if resting else 0.2):
+			_climb_wall()
+			return
+		_path.append(_spread_floor_point())
 	else:
 		_state_timer = _rng.randf_range(1.5, 5.0)  # inspecting a dig face or standing guard
 
@@ -742,6 +771,8 @@ func _update_idle(delta: float) -> void:
 			_sprite.flip_h = _facing_left
 		_sprite.rotation = sin(age * 5.0) * 0.08
 		return
+	if _on_wall:
+		return  # resting up on the wall or ceiling until its next job
 	_pause_timer -= delta
 	if _pause_timer <= 0.0:
 		var resting := _tunnels.chamber_role(_current_node) == "rest"
@@ -770,7 +801,7 @@ func _update_idle(delta: float) -> void:
 				_path.append(Vector2(emerging.x + _rng.randf_range(-5.0, 5.0),
 						_tunnels.chamber_floor_y(_current_node) - _half_height))
 				return
-		if _rng.randf() < 0.12 and role != Role.ALATE:
+		if _rng.randf() < 0.12 and role != Role.ALATE and not _on_wall:
 			# ants groom themselves often: forelegs comb the antennae and are cleaned in turn
 			_groom_left = _rng.randf_range(2.0, 4.0)
 			_groom_mode = GROOM_SELF
@@ -785,7 +816,7 @@ func _update_idle(delta: float) -> void:
 						_tunnels.chamber_floor_y(_current_node) - _half_height))
 				return
 		if _tunnels.is_chamber(_current_node) and _rng.randf() < (0.3 if resting else 0.65):
-			_path.append(_tunnels.random_floor_point(_current_node, _rng, _half_height))
+			_path.append(_spread_floor_point())
 	elif _tend_x != INF:
 		var dx := _tend_x - position.x
 		if absf(dx) > 0.5 and (dx < 0.0) != _facing_left:
@@ -807,6 +838,82 @@ func _warmth() -> float:
 		_warmth_clock = 0.4
 		_warmth_cache = Climate.activity(_colony.temperature_at(position.y))
 	return _warmth_cache
+
+
+## Keeps the ant's feet on whatever surface it is on: floor, wall or ceiling. The
+## nearest soil is found by sampling around the ant; walking ants turn upside down on a
+## ceiling, and an ant resting on a wall lines up with it.
+func _cling(delta: float) -> void:
+	if state in [State.FLYING, State.LEAVING, State.FORAGE_SURFACE] or position.y < _ground_y + 8.0:
+		if _sprite.flip_v:
+			_sprite.flip_v = false
+		return
+	_wall_clock -= delta
+	if _wall_clock <= 0.0:
+		_wall_clock = 0.12
+		var sum := Vector2.ZERO
+		for k in 8:
+			var d := Vector2.RIGHT.rotated(k * PI / 4.0)
+			if _tunnels.is_solid(position + d * (_half_height + 2.0)):
+				sum += d
+		if sum.length() > 0.5:
+			_wall = sum.normalized()
+	if _on_wall and not _moving and state == State.IDLE_CHAMBER:
+		_sprite.flip_v = false
+		_sprite.rotation = lerp_angle(_sprite.rotation, _wall.angle() - PI / 2.0, clampf(delta * 8.0, 0.0, 1.0))
+		return
+	var up := Vector2.UP.rotated(_sprite.rotation)  # the sprite's own "up" before any flip
+	var into := up.dot(_wall)
+	if into > 0.3:
+		_sprite.flip_v = true  # its back faces the soil: walk upside down
+	elif into < -0.3:
+		_sprite.flip_v = false
+
+
+## A resting spot on the chamber floor, away from the other ants there.
+func _spread_floor_point() -> Vector2:
+	var best := _tunnels.random_floor_point(_current_node, _rng, _half_height)
+	var best_room := -1.0
+	var others := get_parent().get_children()
+	for attempt in 4:
+		var p := _tunnels.random_floor_point(_current_node, _rng, _half_height) if attempt > 0 else best
+		var room := INF
+		for o in others:
+			if o != self:
+				room = minf(room, absf(o.position.x - p.x) + absf(o.position.y - p.y) * 2.0)
+		if room > best_room:
+			best_room = room
+			best = p
+	return best
+
+
+## Climbs the chamber's curved wall to rest on the side or the ceiling.
+func _climb_wall() -> void:
+	var center: Vector2 = _tunnels.nodes[_current_node]
+	var floor_y := _tunnels.chamber_floor_y(_current_node) - _half_height
+	var right := _rng.randf() < 0.5
+	var target_angle := _rng.randf_range(0.15, 1.45) * (1.0 if right else -1.0)  # 0 = straight up
+	var points: Array[Vector2] = []
+	# from the floor corner, up the wall in small steps to the chosen spot
+	var start := _tunnels.wall_point(Vector2(center.x, floor_y), Vector2.RIGHT if right else Vector2.LEFT, _half_height + 0.5)
+	points.append(start)
+	var a := PI / 2.0 * (1.0 if right else -1.0)
+	var steps := 6
+	for i in range(1, steps + 1):
+		var ang := lerpf(a, target_angle, float(i) / steps)
+		var dir := Vector2(sin(ang), -cos(ang))
+		var radii: Vector2 = _tunnels.chambers[_current_node]["radii"]
+		var reach := Vector2(dir.x * radii.x, dir.y * radii.y).length()
+		var from := center + Vector2(0.0, 2.0)
+		var hit := _tunnels.wall_point(from, dir, _half_height + 0.5, reach + 6.0)
+		if hit == from:  # an opening (a gallery joins here): keep to the room's outline
+			hit = from + dir * maxf(reach - _half_height - 1.0, 0.0)
+		points.append(hit)
+	_path.append_array(points)
+	_wall_route = points.duplicate()
+	_wall_route.reverse()
+	_wall_route.append(Vector2(center.x + (8.0 if right else -8.0), floor_y))
+	_on_wall = true
 
 
 ## Old age: the ant stops where it is and dies; nestmates will carry the body out.

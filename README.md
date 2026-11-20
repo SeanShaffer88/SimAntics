@@ -13,6 +13,7 @@ A passive, observational ant-farm simulation for Android, built in Godot 4.7.2 (
 - **Temperature.** Air and soil temperature follow the season, the time of day and the weather; the daily swing fades with depth. Ants are cold-blooded: they slow in the cold and speed up in warmth. Each species forages only within its own ground-temperature range, and nurses keep the brood in whichever nursery is closest to 28°C. The info panel shows ground, upper-nest and deep temperatures.
 - **Brood biology.** A founding queen raises small nanitic workers first; majors and soldiers only appear once the colony has 20+ workers and protein in store. Nurses keep eggs in a central clump with larvae around it, bigger larvae further out and pupae at the edges. When protein runs out, nurses feed some eggs to the larvae.
 - **Weather defences.** Harvesters and leafcutters plug their entrances with soil and pebbles at night, in rain and in the cold, once every forager is home. In winter the colony huddles in the deepest chambers. Damp seeds sprout in the granaries and workers throw them out. Workers of one caste vary a little in size.
+- **Ants on every surface.** Ants walk on gallery floors, walls and ceilings (upside down), split between both sides of a tunnel, and some rest up on chamber walls. Idle ants spread out instead of piling up.
 - **Founding and digging.** A new colony starts as a founding queen, her first brood and four workers in one small chamber. Workers dig the rest of the nest out over time:
   - Each soil pellet they carry out lands on a growing mound.
   - Chambers widen as they're dug.
@@ -55,6 +56,12 @@ godot --headless --path . -s res://tools/tests/test_nest_generator.gd
 ```
 
 These check 300 seeds: every chamber is reachable, no chambers overlap, every node stays inside the frame, the chamber roles are valid, and the same seed always gives the same nest.
+
+```
+godot --headless --path . -s res://tools/tests/test_inside_nest.gd -- --colony-seed=3
+```
+
+Plays a colony at 10x and fails if any ant or brood item ends up inside solid soil.
 
 ## Android
 
