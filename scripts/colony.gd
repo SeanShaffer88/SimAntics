@@ -69,6 +69,21 @@ var _waste_chamber: Dictionary = {}  # sprite instance id -> chamber id
 var _refuse: Array[Sprite2D] = []  # waste already dumped on the refuse heap
 var _reserve_clock := RESERVE_FEED_INTERVAL
 var _dig_claims: Dictionary = {}  # node being dug into -> ants digging it
+var _retinue := 0  # nurses currently attending the queen
+
+const RETINUE_SIZE := 4
+
+
+## A nurse in the queen's chamber asks to join her retinue of attendants.
+func join_retinue() -> bool:
+	if _retinue >= RETINUE_SIZE:
+		return false
+	_retinue += 1
+	return true
+
+
+func leave_retinue() -> void:
+	_retinue = maxi(0, _retinue - 1)
 
 
 signal soil_dumped(x: float)
@@ -141,8 +156,28 @@ func _misplaced(b: Brood) -> bool:
 		return true
 	# pupae go to their own chamber; eggs and larvae stay in the nurseries
 	if not _pupa_room_ids().is_empty():
-		return _pupa_room_ids().has(b.chamber) != (b.stage == Stage.PUPA)
+		if _pupa_room_ids().has(b.chamber) != (b.stage == Stage.PUPA):
+			return true
+	# eggs and larvae follow the warmth: nurses keep them in the warm nursery
+	var warm := _warm_nursery()
+	if warm != -1 and b.stage != Stage.PUPA and _nursery_ids().has(b.chamber) and b.chamber != warm:
+		return true
 	return false
+
+
+## The nursery the brood should be in right now: brood is carried up into warm shallow
+## soil by day and back down to the steadier deep soil at night, as real nurses do.
+## -1 when the colony has only one nursery.
+func _warm_nursery() -> int:
+	var ids := _nursery_ids()
+	if ids.size() < 2:
+		return -1
+	var pick: int = ids[0]
+	for id in ids:
+		var y: float = _tunnels.nodes[id].y
+		if (night and y > _tunnels.nodes[pick].y) or (not night and y < _tunnels.nodes[pick].y):
+			pick = id
+	return pick
 
 
 func _add_brood(stage: Stage, chamber: int, zone: String, age: float) -> Brood:
@@ -290,6 +325,8 @@ func _move_task(b: Brood) -> Dictionary:
 	var target: int
 	if b.stage == Stage.PUPA and not _pupa_room_ids().is_empty():
 		target = b.chamber if _pupa_room_ids().has(b.chamber) else _pupa_home(-1)
+	elif _warm_nursery() != -1:
+		target = _warm_nursery()
 	else:
 		target = b.chamber if _nursery_ids().has(b.chamber) else _nursery_ids()[_rng.randi() % _nursery_ids().size()]
 	b.reserved = true

@@ -549,6 +549,17 @@ func _set_queen_position(id: int) -> void:
 
 
 ## A small heave of the queen's body as she lays.
+## A spot on the floor right beside the queen, for an attendant nurse.
+func queen_attend_spot(rng: RandomNumberGenerator, half_height: float) -> Vector2:
+	var side := -1.0 if rng.randf() < 0.5 else 1.0
+	var reach := _queen.texture.get_width() * ColonyArt.SPRITE_SCALE * 0.5 + rng.randf_range(4.0, 12.0)
+	return Vector2(_queen.position.x + side * reach, chamber_floor_y(queen_chamber()) - half_height)
+
+
+func queen_position() -> Vector2:
+	return _queen.position
+
+
 func queen_lay_pulse() -> void:
 	if _queen_tween != null:
 		_queen_tween.kill()

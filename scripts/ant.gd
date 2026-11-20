@@ -67,6 +67,7 @@ var _harvest_left := -1.0
 var _snatched := false
 var _dig_left := -1.0  # seconds of digging left at the soil face (-1 when not digging)
 var _nuptial := false  # a winged alate heading out on its mating flight
+var _attending := false  # one of the queen's attendants right now
 var _fly_velocity := Vector2.ZERO
 var _fly_clock := 0.0
 var _task: Dictionary = {}
@@ -164,6 +165,8 @@ func describe() -> String:
 				parts.append("carrying food")
 	elif _greet_left > 0.0:
 		parts.append("touching antennae")
+	elif _attending:
+		parts.append("attending the queen")
 	elif _dig_left > 0.0:
 		parts.append("digging")
 	elif _harvest_left > 0.0:
@@ -514,6 +517,13 @@ func _arrive() -> void:
 func _start_idle() -> void:
 	state = State.IDLE_CHAMBER
 	_pause_timer = 0.0
+	if role == Role.NURSE and _current_node == _tunnels.queen_chamber() and _colony != null \
+			and _callow_left <= 0.0 and _colony.join_retinue():
+		# one of the queen's attendants: stand beside her, facing her, grooming and feeding
+		_attending = true
+		_state_timer = _rng.randf_range(20.0, 45.0)
+		_path.append(_tunnels.queen_attend_spot(_rng, _half_height))
+		return
 	if _tunnels.is_chamber(_current_node):
 		# Real colonies have many idle workers; in rest chambers they settle for a long while.
 		var resting := _tunnels.chamber_role(_current_node) == "rest"
@@ -528,7 +538,18 @@ func _update_idle(delta: float) -> void:
 	if not _follow_path(delta):
 		return
 	if _state_timer <= 0.0:
+		if _attending:
+			_attending = false
+			_colony.leave_retinue()
 		_next_job()
+		return
+	if _attending:
+		# face the queen and tend her: small head movements, no wandering off
+		var dx := _tunnels.queen_position().x - position.x
+		if absf(dx) > 0.5 and (dx < 0.0) != _facing_left:
+			_facing_left = dx < 0.0
+			_sprite.flip_h = _facing_left
+		_sprite.rotation = sin(age * 5.0) * 0.08
 		return
 	_pause_timer -= delta
 	if _pause_timer <= 0.0:

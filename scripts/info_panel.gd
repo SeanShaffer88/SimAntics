@@ -4,6 +4,10 @@ extends PanelContainer
 ## start over with a brand-new colony (after confirming).
 
 signal new_colony_requested
+signal keep_screen_on_changed(on: bool)
+signal speed_changed(speed: float)
+
+const SPEEDS := [1.0, 2.0, 4.0]
 
 const TEXT := Color("#f0dcb4")
 const DIM := Color("#c8b494")
@@ -16,11 +20,16 @@ var _rows: Dictionary = {}
 var _graph: Control
 var _refresh := 0.0
 var _confirm: ConfirmationDialog
+var _keep_on: CheckButton
+var _speed_buttons: Array[Button] = []
 
 
-func setup(stats: Callable, history: Callable) -> void:
+func setup(stats: Callable, history: Callable, keep_on: bool, speed: float) -> void:
 	_stats = stats
 	_history = history
+	_keep_on.set_pressed_no_signal(keep_on)
+	for i in SPEEDS.size():
+		_speed_buttons[i].set_pressed_no_signal(is_equal_approx(SPEEDS[i], speed))
 
 
 func _ready() -> void:
@@ -50,6 +59,36 @@ func _ready() -> void:
 	_graph.custom_minimum_size = Vector2(300, 64)
 	_graph.draw.connect(_draw_graph)
 	box.add_child(_graph)
+	# settings: keep the phone awake on a desk, and how fast to watch
+	_keep_on = CheckButton.new()
+	_keep_on.text = "Keep screen on"
+	_keep_on.focus_mode = Control.FOCUS_NONE
+	_keep_on.add_theme_color_override("font_color", DIM)
+	_keep_on.toggled.connect(func(on: bool): keep_screen_on_changed.emit(on))
+	box.add_child(_keep_on)
+	var speed_row := HBoxContainer.new()
+	speed_row.add_theme_constant_override("separation", 6)
+	var speed_label := Label.new()
+	speed_label.text = "Watch speed"
+	speed_label.add_theme_font_size_override("font_size", 14)
+	speed_label.add_theme_color_override("font_color", DIM)
+	speed_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	speed_row.add_child(speed_label)
+	var group := ButtonGroup.new()
+	for s: float in SPEEDS:
+		var b := Button.new()
+		b.text = "%d×" % int(s)
+		b.toggle_mode = true
+		b.button_group = group
+		b.focus_mode = Control.FOCUS_NONE
+		b.custom_minimum_size = Vector2(44, 0)
+		b.toggled.connect(func(on: bool):
+			if on:
+				speed_changed.emit(s))
+		speed_row.add_child(b)
+		_speed_buttons.append(b)
+	box.add_child(speed_row)
+
 	var restart := Button.new()
 	restart.text = "Start a new colony…"
 	restart.focus_mode = Control.FOCUS_NONE

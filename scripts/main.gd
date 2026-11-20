@@ -116,6 +116,7 @@ func _ready() -> void:
 	_selector.setup(_surface.preset_names(), _surface.current_preset)
 	_selector.preview_requested.connect(_surface.show_preset)
 	_selector.preset_locked.connect(_save_preset)
+	_apply_safe_area()
 	_show_title(away)
 
 
@@ -518,21 +519,30 @@ func _build_food_dock(observer: ObserverScript) -> void:
 	_dock.grow_vertical = Control.GROW_DIRECTION_BEGIN
 	_dock.offset_bottom = -12.0
 	$UI.add_child(_dock)
-	_dock.dropped.connect(_on_food_dropped)
+	_dock.tapped.connect(_on_food_tapped)
 	observer.input_blocked = _dock.owns_pointer
 	_selector.picker_toggled.connect(func(open: bool):
 		_dock.visible = not open)  # the surface picker uses the same spot
 
 
-func _on_food_dropped(kind: String, screen_pos: Vector2) -> void:
-	var world := get_viewport().get_canvas_transform().affine_inverse() * screen_pos
-	# food only lands on the surface (a little leeway into the topsoil for fat fingers)
-	if world.y > SOIL_TOP + 24.0 or world.x < SURFACE_MARGIN or world.x > VIEW_SIZE.x - SURFACE_MARGIN:
-		return
-	_drop_food(kind, world.x)
+## A tap on the dock drops that food somewhere on the surface, clear of the nest openings.
+func _on_food_tapped(kind: String) -> void:
+	var x := VIEW_SIZE.x * 0.5
+	for attempt in 12:
+		x = _spawn_rng.randf_range(SURFACE_MARGIN + 20.0, VIEW_SIZE.x - SURFACE_MARGIN - 20.0)
+		var clear := true
+		for ex in _subterranean.entrance_xs:
+			if absf(x - ex) < 40.0:
+				clear = false
+		for c in _food_layer.get_children():
+			if absf(x - c.position.x) < 36.0:
+				clear = false
+		if clear:
+			break
+	_drop_food(kind, x, -1, true)
 
 
-func _drop_food(kind: String, x: float, crumbs_left: int = -1) -> void:
+func _drop_food(kind: String, x: float, crumbs_left: int = -1, animate: bool = false) -> void:
 	var drops := _food_layer.get_children()
 	if drops.size() >= MAX_FOOD_DROPS:
 		drops[0].queue_free()  # the oldest pile is cleared away
@@ -540,6 +550,10 @@ func _drop_food(kind: String, x: float, crumbs_left: int = -1) -> void:
 	_food_layer.add_child(cluster)
 	cluster.setup(kind, Vector2(x, GROUND_Y), _spawn_rng.randi(), crumbs_left)
 	colony.add_cluster(cluster)
+	if animate:  # it falls in from above and settles with a little bounce
+		cluster.position.y = GROUND_Y - 70.0
+		var fall := cluster.create_tween()
+		fall.tween_property(cluster, "position:y", GROUND_Y, 0.45).set_trans(Tween.TRANS_BOUNCE).set_ease(Tween.EASE_OUT)
 
 
 func _food_save() -> Array:
@@ -568,8 +582,18 @@ func _build_info_panel() -> void:
 	panel.offset_top = 12.0
 	panel.offset_right = -12.0
 	$UI.add_child(panel)
-	panel.setup(_colony_stats, func() -> Array: return _history)
+	var keep_on: bool = _load_setting("display", "keep_screen_on", true)
+	var speed: float = _load_setting("display", "speed", 1.0)
+	_apply_keep_on(keep_on)
+	Engine.time_scale = speed
+	panel.setup(_colony_stats, func() -> Array: return _history, keep_on, speed)
 	panel.new_colony_requested.connect(_start_new_colony)
+	panel.keep_screen_on_changed.connect(func(on: bool):
+		_apply_keep_on(on)
+		_save_setting("display", "keep_screen_on", on))
+	panel.speed_changed.connect(func(s: float):
+		Engine.time_scale = s
+		_save_setting("display", "speed", s))
 
 	var button := Button.new()
 	button.name = "InfoButton"
@@ -586,6 +610,50 @@ func _build_info_panel() -> void:
 	button.offset_bottom = -12.0
 	button.pressed.connect(panel.toggle)
 	$UI.add_child(button)
+
+
+## Keeps buttons and panels clear of camera notches and rounded corners on phones.
+## Only the part of a cut-out that reaches into the game area (not the letterbox) counts.
+func _apply_safe_area() -> void:
+	if not OS.get_name() in ["Android", "iOS"]:
+		return
+	var win := Vector2(DisplayServer.window_get_size())
+	var safe := Rect2(DisplayServer.get_display_safe_area())
+	var scale := minf(win.x / VIEW_SIZE.x, win.y / VIEW_SIZE.y)
+	var bars := (win - VIEW_SIZE * scale) * 0.5  # letterbox on each side
+	var left := maxf(0.0, safe.position.x - bars.x) / scale
+	var right := maxf(0.0, (win.x - safe.end.x) - bars.x) / scale
+	var top := maxf(0.0, safe.position.y - bars.y) / scale
+	var bottom := maxf(0.0, (win.y - safe.end.y) - bars.y) / scale
+	if left + right + top + bottom < 0.5:
+		return
+	for node in $UI.get_children():
+		var c := node as Control
+		if c == null:
+			continue
+		if c.anchor_left == 0.0 and c.anchor_right == 1.0:  # full width: shrink inward
+			c.offset_left += left
+			c.offset_right -= right
+		elif c.anchor_left >= 1.0:
+			c.offset_left -= right
+			c.offset_right -= right
+		elif c.anchor_right <= 0.0:
+			c.offset_left += left
+			c.offset_right += left
+		if c.anchor_top == 0.0 and c.anchor_bottom == 1.0:
+			c.offset_top += top
+			c.offset_bottom -= bottom
+		elif c.anchor_top >= 1.0:
+			c.offset_top -= bottom
+			c.offset_bottom -= bottom
+		elif c.anchor_bottom <= 0.0:
+			c.offset_top += top
+			c.offset_bottom += top
+
+
+## An ant farm left on a desk shouldn't let the phone go to sleep (if the player agrees).
+func _apply_keep_on(on: bool) -> void:
+	DisplayServer.screen_set_keep_on(on)
 
 
 ## The figures shown in the info panel.
