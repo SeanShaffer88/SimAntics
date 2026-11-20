@@ -97,6 +97,7 @@ func _ready() -> void:
 	_spoil.setup(GROUND_Y, profile.soil["strata"][1], profile.seed_value)
 	_spoil.restore(saved.get("spoil", {}))
 	colony.soil_dumped.connect(_spoil.add)
+	colony.midden_dumped.connect(_spoil.add_chaff)
 	_subterranean.entrance_opened.connect(func(x: float):
 		_spoil.add_hole(x)
 		for i in 10:
@@ -119,6 +120,8 @@ func _ready() -> void:
 	_history = saved.get("history", [])
 	notes.restore(saved.get("notes", {}))
 	saved["day"] = int(saved.get("day", 0)) + _away_days
+	if profile.species["id"] == "garden":
+		_build_aphids()
 	_build_seasons(saved)
 	_hook_field_notes(founding)
 	if away != "":
@@ -580,6 +583,8 @@ func _on_food_tapped(kind: String) -> void:
 		for c in _food_layer.get_children():
 			if absf(x - c.position.x) < 36.0:
 				clear = false
+		if not is_nan(colony.aphid_x) and absf(x - colony.aphid_x) < 30.0:
+			clear = false
 		if clear:
 			break
 	_drop_food(kind, x, -1, true)
@@ -774,7 +779,7 @@ func _colony_stats() -> Dictionary:
 		"brood": brood,
 		"food": food,
 		"nest": [roundi(100.0 * dug / maxi(1, _subterranean.dug.size())), open_chambers, _subterranean.chambers.size()],
-		"guide": [notes.count_prefix("seen_"), BEHAVIORS.size()],
+		"guide": [notes.count_prefix("seen_"), _guide_total()],
 	}
 
 
@@ -982,6 +987,10 @@ const BEHAVIORS := {
 	"carry_soil": ["Carrying spoil", "You watched a digger carry excavated soil up to the mound."],
 	"carry_brood": ["Moving brood", "You watched a nurse carry brood to a better spot in the nest."],
 	"tending": ["Tending brood", "You watched a nurse groom the brood, licking it clean."],
+	"midden": ["Building the midden", "A harvester carried seed husks up and out to the midden beside the mound."],
+	"milling": ["Milling seeds", "A big-headed major cracked seeds open with its huge jaws for its nestmates."],
+	"hitchhiking": ["Hitchhiker", "A tiny minima rode home on a leaf, guarding the carrier from parasitic flies."],
+	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
 	"trophallaxis": ["Trophallaxis", "You watched two ants share food mouth to mouth."],
 	"antennation": ["Antennation", "You watched two nestmates touch antennae to recognise each other."],
@@ -1005,7 +1014,7 @@ func _on_ant_inspected(ant: Node2D) -> void:
 		return
 	notes.note(BEHAVIORS[key][1], "seen_" + key)
 	_announce("Behaviour observed: %s  (%d of %d)" % [BEHAVIORS[key][0], notes.count_prefix("seen_"),
-			BEHAVIORS.size()])
+			_guide_total()])
 
 
 # ---------------------------------------------------------------------------
@@ -1013,6 +1022,44 @@ func _on_ant_inspected(ant: Node2D) -> void:
 # ---------------------------------------------------------------------------
 
 const SeasonsScript := preload("res://scripts/seasons.gd")
+## Behaviours only one species shows; the others never count toward a colony's guide.
+const SPECIES_BEHAVIORS := {"midden": "harvester", "milling": "bigheaded",
+		"hitchhiking": "leafcutter", "aphids": "garden"}
+
+
+func _guide_total() -> int:
+	var total := 0
+	for key in BEHAVIORS:
+		if SPECIES_BEHAVIORS.get(key, profile.species["id"]) == profile.species["id"]:
+			total += 1
+	return total
+
+
+const AphidPlantScript := preload("res://scripts/aphid_plant.gd")
+
+var _aphid_plant: Node2D = null
+
+
+## Black garden ants keep a herd of aphids on a weed near the nest (always the same spot
+## for a given colony).
+func _build_aphids() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = profile.seed_value + 404
+	var x := VIEW_SIZE.x * 0.5
+	for attempt in 20:
+		x = rng.randf_range(SURFACE_MARGIN + 60.0, VIEW_SIZE.x - SURFACE_MARGIN - 60.0)
+		var clear := true
+		for ex in _subterranean.entrance_xs:
+			if absf(x - ex) < 70.0:
+				clear = false
+		if clear:
+			break
+	_aphid_plant = AphidPlantScript.new()
+	_aphid_plant.name = "AphidPlant"
+	add_child(_aphid_plant)
+	move_child(_aphid_plant, _food_layer.get_index())
+	_aphid_plant.setup(GROUND_Y, x, profile.seed_value)
+	colony.aphid_x = x
 const SEASON_NOTES := [
 	"Spring: the soil warms and the queen lays faster.",
 	"Summer: long warm days; mature colonies send out their alates.",
@@ -1043,6 +1090,8 @@ func _apply_season() -> void:
 	colony.lay_rate = 1.4 if s == SeasonsScript.SPRING else 1.0
 	weather.snow = colony.winter
 	weather.autumn = s == SeasonsScript.AUTUMN
+	if _aphid_plant != null:
+		_aphid_plant.winter = colony.winter
 	_day_night.season_tint = [Color(1.0, 1.0, 0.97), Color(1.03, 1.0, 0.92), Color(1.0, 0.9, 0.78),
 			Color(0.84, 0.9, 1.02)][s]
 

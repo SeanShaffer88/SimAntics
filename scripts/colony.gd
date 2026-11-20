@@ -132,6 +132,23 @@ func describe_brood(b: Brood) -> String:
 	return "%s  ·  emerging soon" % kind if b.age > b.duration * 0.75 else kind
 
 
+func species_id() -> String:
+	return _species["id"]
+
+
+## A stored food item's position in a chamber (for a major milling seeds), or INF.
+func food_position_in(chamber: int) -> Vector2:
+	if not _tunnels.food_items.has(chamber):
+		return Vector2.INF
+	var store: Array = _tunnels.food_items[chamber]
+	if store.is_empty():
+		return Vector2.INF
+	return (store[_rng.randi() % store.size()] as Sprite2D).position
+
+
+var aphid_x := NAN  # where a garden-ant colony tends its aphids on the surface (NAN if none)
+
+
 ## Where a resting item of brood lies in a chamber (for an idle nurse to groom), or INF.
 func brood_position_in(chamber: int) -> Vector2:
 	var here: Array[Brood] = []
@@ -157,6 +174,7 @@ func leave_retinue() -> void:
 
 signal soil_dumped(x: float)
 signal food_found(kind: String)
+signal midden_dumped(x: float)
 
 ## `saved`: this colony's state from a previous session (see to_save()), or empty for a new
 ## colony. `founding`: a brand-new colony that starts as a queen and her first brood.
@@ -443,8 +461,11 @@ func _food_source() -> Dictionary:
 
 ## Offers a nest worker a job hauling waste to the refuse chamber.
 func waste_task() -> Dictionary:
+	# Harvester ants carry seed chaff out and dump it on a midden beside the nest
+	# mound; other species keep refuse in a chamber away from the brood.
+	var midden: bool = _species["id"] == "harvester"
 	var dumps := _tunnels.chambers_with_role("refuse")
-	if _waste.is_empty() or dumps.is_empty():
+	if _waste.is_empty() or (dumps.is_empty() and not midden):
 		return {}
 	var item: Sprite2D = _waste.pop_front()
 	var chamber: int = _waste_chamber.get(item.get_instance_id(), -1)
@@ -452,8 +473,9 @@ func waste_task() -> Dictionary:
 	if chamber == -1:
 		item.queue_free()
 		return {}
+	var drop: int = _tunnels.nearest_entrance(item.position.x) if midden else dumps[0]
 	return {"type": "waste", "item": item, "pickup_node": chamber, "pickup_pos": item.position,
-			"drop_node": dumps[0], "zone": "refuse"}
+			"drop_node": drop, "zone": "midden" if midden else "refuse"}
 
 
 ## A forager coming home finds food on the surface; returns its task and the item to carry.
@@ -509,7 +531,7 @@ func pick_up(task: Dictionary) -> Sprite2D:
 
 ## Where the carried item should be put down.
 func drop_position(task: Dictionary) -> Vector2:
-	if task["type"] == "dig":  # soil is dumped beside the entrance, building up the mound
+	if task["type"] == "dig" or task.get("zone") == "midden":  # dumped beside the entrance
 		var entrance := _tunnels.nodes[task["drop_node"]]
 		var side := -1.0 if _rng.randf() < 0.5 else 1.0
 		return Vector2(entrance.x + side * _rng.randf_range(16.0, 46.0), entrance.y)
@@ -547,12 +569,21 @@ func drop(task: Dictionary, carried: Sprite2D, at: Vector2) -> void:
 				_refresh_texture(b)
 			_leave_waste(b.chamber, at)
 		"waste":
+			if task["zone"] == "midden":
+				carried.queue_free()
+				midden_dumped.emit(at.x)
+				return
 			_tunnels.place_item(carried, at)
 			_refuse.append(carried)
 			while _refuse.size() > MAX_REFUSE_ITEMS:  # older waste packs down into the heap
 				_refuse.pop_front().queue_free()
 		"store":
 			var target: int = task["drop_node"]
+			if carried.has_meta("hitchhiker"):  # the rider climbs off once home
+				carried.remove_meta("hitchhiker")
+				var rider := carried.get_node_or_null("Hitchhiker")
+				if rider != null:
+					rider.queue_free()
 			_tunnels.place_item(carried, at)
 			if not _tunnels.food_items.has(target) and _species["food"] != "fungus":
 				_tunnels.food_items[target] = []  # the queen's chamber keeps a small store at first
@@ -764,6 +795,16 @@ func crumb_task(kind: String) -> Dictionary:
 		_:
 			tex = ColonyArt.food_crumb(kind, _rng.randi_range(0, 2))
 	var item := _tunnels.add_item(tex, Vector2.ZERO, "food")
+	if kind == "leaves" and _species["id"] == "leafcutter" and _rng.randf() < 0.3:
+		# a tiny minima rides on the leaf, guarding the carrier from parasitic flies
+		var rider := Sprite2D.new()
+		var castes: Array = _species["castes"]
+		rider.texture = ColonyArt.ant_frames(_species, castes[0]["size"], castes[0]["head"])[0]
+		rider.position = Vector2(0.0, -tex.get_height() * 0.5 - 2.0)
+		rider.name = "Hitchhiker"
+		item.add_child(rider)
+		item.set_meta("hitchhiker", true)
+		count("hitchhikers")
 	count("crumb_" + kind)
 	return {"type": "store", "item": item, "drop_node": targets[_rng.randi() % targets.size()], "zone": "food"}
 

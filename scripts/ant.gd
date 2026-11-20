@@ -71,7 +71,10 @@ var _dig_left := -1.0  # seconds of digging left at the soil face (-1 when not d
 var _nuptial := false  # a winged alate heading out on its mating flight
 var _attending := false  # one of the queen's attendants right now
 var _crop_left := 0.0  # seconds this ant still has liquid food in its crop to share
-var _tend_x := INF  # x of the brood item an idle nurse is grooming
+var _tend_x := INF  # x of the brood item an idle nurse is grooming (or the seed a major mills)
+var _milling := false  # a big-headed major cracking seeds in a granary
+var _aphid_left := -1.0  # seconds left tending aphids on the surface (black garden ants)
+var _to_aphids := false
 
 const CROP_TIME := 150.0
 
@@ -161,10 +164,10 @@ func behavior_key() -> String:
 			"brood":
 				return "carry_brood"
 			"waste":
-				return "haul_waste"
+				return "midden" if _task.get("zone") == "midden" else "haul_waste"
 			"soil":
 				return "carry_soil"
-		return "carry_food"
+		return "hitchhiking" if _carried.has_meta("hitchhiker") else "carry_food"
 	if _greet_left > 0.0:
 		return "trophallaxis" if has_crop() else "antennation"
 	if _attending:
@@ -174,7 +177,9 @@ func behavior_key() -> String:
 	if _harvest_left > 0.0:
 		return "harvesting"
 	if _tend_x != INF and state == State.IDLE_CHAMBER:
-		return "tending"
+		return "milling" if _milling else "tending"
+	if _aphid_left > 0.0:
+		return "aphids"
 	if state == State.FORAGE_SURFACE:
 		return "foraging"
 	if state == State.IDLE_CHAMBER and _tunnels.chamber_role(_current_node) == "rest":
@@ -221,7 +226,9 @@ func describe() -> String:
 	elif _dig_left > 0.0:
 		parts.append("digging")
 	elif _tend_x != INF and state == State.IDLE_CHAMBER:
-		parts.append("tending the brood")
+		parts.append("milling seeds" if _milling else "tending the brood")
+	elif _aphid_left > 0.0:
+		parts.append("tending aphids")
 	elif _harvest_left > 0.0:
 		parts.append("gathering food")
 	elif _food_target != null:
@@ -633,6 +640,18 @@ func _update_idle(delta: float) -> void:
 		var resting := _tunnels.chamber_role(_current_node) == "rest"
 		_pause_timer = _rng.randf_range(4.0, 12.0) if resting else _rng.randf_range(0.6, 3.0)
 		_tend_x = INF
+		if role == Role.GUARD and _colony != null and _colony.species_id() == "bigheaded" \
+				and _tunnels.chamber_role(_current_node) == "food":
+			# Pheidole majors use their huge heads and jaws to crack and mill seeds
+			var seed_at: Vector2 = _colony.food_position_in(_current_node)
+			if seed_at != Vector2.INF:
+				_tend_x = seed_at.x
+				_milling = true
+				_pause_timer = _rng.randf_range(4.0, 9.0)
+				_path.append(Vector2(seed_at.x + _rng.randf_range(-6.0, 6.0),
+						_tunnels.chamber_floor_y(_current_node) - _half_height))
+				return
+		_milling = false
 		if role == Role.NURSE and _colony != null and _rng.randf() < 0.75:
 			# idle nurses groom and lick the brood: go to one and work over it
 			var brood_at: Vector2 = _colony.brood_position_in(_current_node)
@@ -661,6 +680,11 @@ func _start_surface_trip() -> void:
 	if _food_target != null and is_instance_valid(_food_target):
 		_state_timer = 60.0  # straight to the food, then home
 		_path.append(Vector2(_food_target.position.x + _rng.randf_range(-6.0, 6.0), _ground_y - _half_height))
+	elif _colony != null and not is_nan(_colony.aphid_x) and not _colony.winter 			and role in [Role.FORAGER, Role.WORKER] and _rng.randf() < 0.4:
+		# garden ants herd aphids on a nearby plant and milk them for honeydew
+		_to_aphids = true
+		_state_timer = 60.0
+		_path.append(Vector2(_colony.aphid_x + _rng.randf_range(-5.0, 5.0), _ground_y - _half_height))
 
 
 func _update_surface(delta: float) -> void:
@@ -669,9 +693,13 @@ func _update_surface(delta: float) -> void:
 		# rain: drop whatever it was doing and hurry home
 		_food_target = null
 		_harvest_left = -1.0
+		_to_aphids = false
+		_aphid_left = -1.0
 		_path.clear()
 		_state_timer = 0.0
 	if not _follow_path(delta):
+		return
+	if _to_aphids and not _returning and _update_aphids(delta):
 		return
 	if not _returning and _food_target != null and _update_harvest(delta):
 		return
@@ -746,6 +774,28 @@ func _update_harvest(delta: float) -> bool:
 		_hold(task["item"])
 		_task = task
 		_state_timer = 0.0  # head straight home with it
+	return false
+
+
+## At the aphid plant: stroke the aphids with the antennae until they release honeydew,
+## drink it into the crop, then head home to share it. Returns true while busy.
+func _update_aphids(delta: float) -> bool:
+	if absf(position.x - _colony.aphid_x) > 10.0 and _aphid_left < 0.0:
+		_path.append(Vector2(_colony.aphid_x + _rng.randf_range(-5.0, 5.0), _ground_y - _half_height))
+		return true
+	if _aphid_left < 0.0:
+		_aphid_left = _rng.randf_range(6.0, 12.0)
+		_facing_left = _colony.aphid_x < position.x
+		_sprite.flip_h = _facing_left
+		_sprite.rotation = 0.0
+	_aphid_left -= delta
+	if _aphid_left > 0.0:
+		return true
+	_aphid_left = -1.0
+	_to_aphids = false
+	fill_crop()
+	_colony.count("honeydew")
+	_state_timer = 0.0
 	return false
 
 
