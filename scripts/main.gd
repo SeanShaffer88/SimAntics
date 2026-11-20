@@ -181,6 +181,7 @@ func _process(delta: float) -> void:
 	_update_skirmish(delta)
 	_update_expansion(delta)
 	_update_wetness(delta)
+	_update_spider(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -285,6 +286,7 @@ func _build_ambiance() -> void:
 	move_child(water, _ants.get_index())
 	water.setup(GROUND_Y, VIEW_SIZE.x, profile.seed_value)
 	colony.water = water
+	_build_spider()
 
 	bird = BirdScript.new()
 	bird.name = "Bird"
@@ -1034,6 +1036,8 @@ const BEHAVIORS := {
 	"grooming": ["Self-grooming", "An ant stopped to comb its antennae clean with its forelegs."],
 	"allogrooming": ["Allogrooming", "One ant licked a nestmate clean, sharing the colony's scent."],
 	"skirmish": ["Border war", "Pavement ants grappled with a rival colony to settle their territory."],
+	"eclosion": ["Helping out", "A nurse helped a new worker out of its pupal case."],
+	"mobbing": ["Mobbing", "Workers swarmed a wolf spider, biting its legs until it fled."],
 	"drinking": ["Drinking", "A forager drank from a raindrop on the grass and carried the water home."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
@@ -1080,6 +1084,45 @@ func _guide_total() -> int:
 	return total
 
 
+const SpiderScript := preload("res://scripts/spider.gd")
+const SPIDER_INTERVAL := Vector2(360.0, 720.0)
+var spider: Node2D
+var _spider_clock := 0.0
+
+
+func _build_spider() -> void:
+	spider = SpiderScript.new()
+	spider.name = "Spider"
+	add_child(spider)
+	move_child(spider, _ants.get_index())
+	spider.setup(GROUND_Y, VIEW_SIZE.x, profile.seed_value)
+	spider.driven_off.connect(func():
+		_announce("The ants drove the spider off!")
+		notes.note("A wolf spider prowled near the nest until a crowd of workers mobbed it and drove it away.", "first_spider"))
+	_spider_clock = _spawn_rng.randf_range(SPIDER_INTERVAL.x * 0.5, SPIDER_INTERVAL.y)
+
+
+func _update_spider(delta: float) -> void:
+	if spider == null:
+		return
+	spider.set_tint(colony.surface_tint)
+	colony.threat = spider if spider.active and not spider.fleeing else null
+	if spider.active:
+		return
+	_spider_clock -= delta
+	if _spider_clock <= 0.0:
+		_spider_clock = _spawn_rng.randf_range(SPIDER_INTERVAL.x, SPIDER_INTERVAL.y)
+		if not colony.raining and not colony.winter and _worker_count() >= 8:
+			start_spider()
+
+
+## A wolf spider walks in from the nearer edge to lurk near one of the open entrances.
+func start_spider() -> void:
+	var open: Array[int] = _subterranean.open_entrances()
+	var lurk: float = _subterranean.nodes[open[_spawn_rng.randi() % open.size()]].x
+	spider.start(lurk < VIEW_SIZE.x * 0.5, lurk)
+
+
 const WaterDropsScript := preload("res://scripts/water_drops.gd")
 var water: Node2D
 var wetness := 0.0  # 0..1: how damp the topsoil is after rain or melting snow
@@ -1113,7 +1156,8 @@ func _update_expansion(delta: float) -> void:
 	if _expand_clock > 0.0:
 		return
 	_expand_clock = EXPAND_CHECK
-	if colony.winter or colony.has_digging() or _subterranean.expansions >= MAX_EXPANSIONS 			or _worker_count() < 15:
+	if colony.winter or colony.has_digging() or _subterranean.expansions >= MAX_EXPANSIONS \
+			or _worker_count() < 15:
 		return
 	if _subterranean.expand() > 0:
 		notes.note("The colony outgrew its nest and started digging new galleries.", "first_expansion")

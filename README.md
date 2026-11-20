@@ -26,6 +26,7 @@ A passive, observational ant-farm simulation for Android, built in Godot 4.7.2 (
   - A bird sometimes hunts surface ants. Tap it three times to scare it off.
 - **Watching.**
   - Tap an ant or a chamber to inspect it.
+  - Tap the same ant again to follow it: the camera zooms in and tracks it, with a live label. Tap elsewhere or drag to stop.
   - Double-tap, pinch or scroll to zoom.
   - There's a day/night cycle and scent trails.
   - The info panel shows colony stats and a population graph, and can start a new colony.

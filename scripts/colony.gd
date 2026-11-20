@@ -146,6 +146,7 @@ func food_position_in(chamber: int) -> Vector2:
 	return (store[_rng.randi() % store.size()] as Sprite2D).position
 
 
+var threat: Node2D = null  # a spider prowling the surface that the ants will mob, or null
 var soil_wetness := 0.0  # 0..1, from recent rain
 var water: Node2D = null  # rain drops on the surface (water_drops.gd), or null
 var skirmish_x := NAN  # border where pavement ants are fighting a rival colony (NAN if none)
@@ -161,6 +162,28 @@ func brood_position_in(chamber: int) -> Vector2:
 	if here.is_empty():
 		return Vector2.INF
 	return here[_rng.randi() % here.size()].sprite.position
+
+
+## Where a pupa nearly ready to emerge lies in a chamber, or INF. Nurses help new adults
+## out: they tear open the cocoon (or peel off the pupal skin) and pull the callow free.
+func emerging_pupa_in(chamber: int) -> Vector2:
+	for b in brood:
+		if b.chamber == chamber and b.stage == Stage.PUPA and not b.carried and b.age >= b.duration * 0.8:
+			return b.sprite.position
+	return Vector2.INF
+
+
+## A nurse works at an emerging pupa: the help brings emergence a little closer.
+func help_emerge(at: Vector2) -> void:
+	for b in brood:
+		if b.stage == Stage.PUPA and not b.carried and b.sprite.position.distance_to(at) < 3.0:
+			b.age += 4.0
+			count("helped_emerge")
+			return
+
+
+func cocoons() -> bool:
+	return _species["cocoons"]
 
 
 ## A nurse in the queen's chamber asks to join her retinue of attendants.

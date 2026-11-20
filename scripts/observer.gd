@@ -1,6 +1,8 @@
 extends Node2D
 ## How the player looks at the farm: tap an ant or chamber to learn about it,
-## double-tap / pinch / mouse wheel to zoom in, and drag to pan while zoomed.
+## double-tap / pinch / mouse wheel to zoom in, and drag to pan while zoomed. Tap an ant
+## a second time to follow it: the camera zooms in and keeps it in view, and its label
+## updates as it goes about its work, until you tap somewhere else or drag.
 ## Taps never change the simulation; this is purely for watching.
 
 const TAP_MAX_MOVE := 12.0
@@ -32,6 +34,11 @@ var _clock := 0.0
 var _followed: Node2D
 var _label_left := 0.0
 var _zoom_tween: Tween
+var _tracking := false  # the camera is following _followed
+var _track_text_clock := 0.0
+var _hints_left := 3  # "tap again to follow" is shown on the first few inspections
+
+const FOLLOW_ZOOM := 2.2
 
 
 func setup(camera: Camera2D, ants: Node2D, tunnels: Node2D, label: Label, view_size: Vector2) -> void:
@@ -52,8 +59,19 @@ func _process(delta: float) -> void:
 			var fade := create_tween()
 			fade.tween_property(_label, "modulate:a", 0.0, 0.6)
 			_followed = null
-	if _followed != null and not is_instance_valid(_followed):
+	if _followed != null and (not is_instance_valid(_followed) or _followed.is_queued_for_deletion()):
 		_followed = null
+		if _tracking:
+			stop_following()
+	if _tracking and _followed != null:
+		_label_left = LABEL_TIME  # keep the label up while following
+		if _zoom_tween == null or not _zoom_tween.is_running():
+			_set_camera(_camera.position.lerp(_followed.global_position, minf(1.0, delta * 4.0)))
+		_track_text_clock -= delta
+		if _track_text_clock <= 0.0:
+			_track_text_clock = 0.5
+			_label.text = _followed.describe() + "  ·  following"
+			_label.reset_size()
 	if _followed != null:
 		_place_label(_followed.global_position)
 	queue_redraw()
@@ -121,6 +139,8 @@ func _on_drag(drag: InputEventScreenDrag) -> void:
 			var mid := ((pts[0] as Vector2) + (pts[1] as Vector2)) * 0.5
 			_zoom_at(_pinch_start_zoom * dist / _pinch_start_dist, mid)
 	elif _camera.zoom.x > 1.01:
+		if _tracking and drag.position.distance_to(_press_pos) > TAP_MAX_MOVE:
+			_tracking = false  # the player takes the camera back
 		_set_camera(_camera.position - drag.relative / _camera.zoom.x)
 
 
@@ -185,13 +205,26 @@ func _inspect(world: Vector2) -> void:
 			best = ant
 	var queen_d := world.distance_to(_tunnels.queen_position())
 	if queen_d < 18.0 and (best == null or queen_d < best_d):
+		if _tracking:
+			stop_following()
 		_followed = null  # the queen is bigger than her attendants: the closer one wins
 		_show(colony.describe_queen(), _tunnels.queen_position())
 		return
 	if best != null:
+		if best == _followed and _label_left > 0.0 and not _tracking:
+			_start_following()
+			return
 		_followed = best
-		_show(best.describe(), best.global_position)
+		var text: String = best.describe()
+		if not _tracking and _hints_left > 0:
+			_hints_left -= 1
+			text += "
+(tap again to follow)"
+		_show(text, best.global_position)
 		ant_inspected.emit(best)
+		return
+	if _tracking:
+		stop_following()
 		return
 	_followed = null
 	var b = colony.brood_near(world, 7.0)
@@ -211,6 +244,32 @@ func _inspect(world: Vector2) -> void:
 				and world.y >= center.y - r.y and world.y <= _tunnels.chamber_floor_y(id) + 4.0:
 			_show(CHAMBER_NAMES.get(c["role"], "Chamber"), world)
 			return
+
+
+func _start_following() -> void:
+	_tracking = true
+	_track_text_clock = 0.0
+	if _zoom_tween != null:
+		_zoom_tween.kill()
+	var target := maxf(_camera.zoom.x, FOLLOW_ZOOM)
+	_zoom_tween = create_tween().set_parallel().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_zoom_tween.tween_property(_camera, "zoom", Vector2.ONE * target, 0.5)
+	_zoom_tween.tween_method(_set_camera, _camera.position, _clamped(_followed.global_position, target), 0.5)
+
+
+## Stops following and eases back out to the whole farm.
+func stop_following() -> void:
+	_tracking = false
+	_label_left = minf(_label_left, 0.8)
+	if _zoom_tween != null:
+		_zoom_tween.kill()
+	_zoom_tween = create_tween().set_parallel().set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	_zoom_tween.tween_property(_camera, "zoom", Vector2.ONE, 0.5)
+	_zoom_tween.tween_method(_set_camera, _camera.position, _view * 0.5, 0.5)
+
+
+func is_following() -> bool:
+	return _tracking
 
 
 const FOOD_LABELS := {"sugar": "Sugar cube", "nectar": "Nectar", "fruit": "Fruit slice",

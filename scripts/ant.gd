@@ -73,6 +73,7 @@ var _attending := false  # one of the queen's attendants right now
 var _crop_left := 0.0  # seconds this ant still has liquid food in its crop to share
 var _tend_x := INF  # x of the brood item an idle nurse is grooming (or the seed a major mills)
 var _milling := false  # a big-headed major cracking seeds in a granary
+var _helping := false  # a nurse helping a new adult out of its cocoon
 var _aphid_left := -1.0  # seconds left tending aphids on the surface (black garden ants)
 var _to_aphids := false
 var _groom_left := 0.0  # seconds of grooming left (self-grooming or grooming a nestmate)
@@ -80,6 +81,8 @@ var _groom_mode := 0  # GROOM_SELF, GROOM_OTHER (the groomer) or GROOM_RECEIVE
 var _groom_x := 0.0  # where the nestmate being groomed (or grooming) stands
 var _fight_left := -1.0  # seconds left grappling a rival at the border (pavement ants)
 var _to_fight := false
+var _to_mob := false  # heading out to mob a spider near the nest
+var _mob_left := -1.0
 var _drink_target: Node2D = null  # a rain drop this forager is heading to drink from
 var _drink_left := -1.0
 
@@ -185,6 +188,8 @@ func behavior_key() -> String:
 		return "skirmish"
 	if _drink_left > 0.0:
 		return "drinking"
+	if _mob_left > 0.0:
+		return "mobbing"
 	if _attending:
 		return "retinue"
 	if _dig_left > 0.0:
@@ -192,7 +197,7 @@ func behavior_key() -> String:
 	if _harvest_left > 0.0:
 		return "harvesting"
 	if _tend_x != INF and state == State.IDLE_CHAMBER:
-		return "milling" if _milling else "tending"
+		return "milling" if _milling else ("eclosion" if _helping else "tending")
 	if _aphid_left > 0.0:
 		return "aphids"
 	if state == State.FORAGE_SURFACE:
@@ -242,12 +247,17 @@ func describe() -> String:
 		parts.append("grappling a rival")
 	elif _drink_left > 0.0:
 		parts.append("drinking a raindrop")
+	elif _mob_left > 0.0:
+		parts.append("biting at a spider")
 	elif _attending:
 		parts.append("attending the queen")
 	elif _dig_left > 0.0:
 		parts.append("digging")
 	elif _tend_x != INF and state == State.IDLE_CHAMBER:
-		parts.append("milling seeds" if _milling else "tending the brood")
+		if _helping:
+			parts.append("helping a new worker out of its cocoon" if _colony.cocoons() else "helping a new worker emerge")
+		else:
+			parts.append("milling seeds" if _milling else "tending the brood")
 	elif _aphid_left > 0.0:
 		parts.append("tending aphids")
 	elif _harvest_left > 0.0:
@@ -276,7 +286,9 @@ func greet(other_pos: Vector2) -> bool:
 
 ## True when this ant is idling in a chamber and free to groom or be groomed.
 func can_allogroom() -> bool:
-	return state == State.IDLE_CHAMBER and _path.is_empty() and not _attending and _tend_x == INF 			and _greet_left <= 0.0 and _groom_left <= 0.0 and _carried == null and role != Role.ALATE 			and _tunnels.is_chamber(_current_node)
+	return state == State.IDLE_CHAMBER and _path.is_empty() and not _attending and _tend_x == INF \
+			and _greet_left <= 0.0 and _groom_left <= 0.0 and _carried == null and role != Role.ALATE \
+			and _tunnels.is_chamber(_current_node)
 
 
 ## Allogrooming: one ant licks and combs a nestmate clean (spreading the colony odour and
@@ -472,6 +484,10 @@ func _next_job() -> void:
 				_food_target = food
 				_travel_to(_tunnels.nearest_entrance(food.position.x))
 				return
+		if _colony.threat != null and role in [Role.GUARD, Role.FORAGER] and _rng.randf() < 0.5:
+			_to_mob = true  # alarm pheromone: guards pour out to drive off the spider
+			_travel_to(_tunnels.nearest_entrance(_colony.threat.position.x))
+			return
 		if not is_nan(_colony.skirmish_x) and role in [Role.FORAGER, Role.WORKER] and _rng.randf() < 0.5:
 			_to_fight = true  # nestmates rush out to hold the border
 			_travel_to(_tunnels.nearest_entrance(_colony.skirmish_x))
@@ -712,6 +728,17 @@ func _update_idle(delta: float) -> void:
 						_tunnels.chamber_floor_y(_current_node) - _half_height))
 				return
 		_milling = false
+		_helping = false
+		if role == Role.NURSE and _colony != null and _rng.randf() < 0.85:
+			var emerging: Vector2 = _colony.emerging_pupa_in(_current_node)
+			if emerging != Vector2.INF:
+				_tend_x = emerging.x
+				_helping = true
+				_pause_timer = _rng.randf_range(3.0, 6.0)
+				_colony.help_emerge(emerging)
+				_path.append(Vector2(emerging.x + _rng.randf_range(-5.0, 5.0),
+						_tunnels.chamber_floor_y(_current_node) - _half_height))
+				return
 		if _rng.randf() < 0.12 and role != Role.ALATE:
 			# ants groom themselves often: forelegs comb the antennae and are cleaned in turn
 			_groom_left = _rng.randf_range(2.0, 4.0)
@@ -745,11 +772,16 @@ func _start_surface_trip() -> void:
 	if _food_target != null and is_instance_valid(_food_target):
 		_state_timer = 60.0  # straight to the food, then home
 		_path.append(Vector2(_food_target.position.x + _rng.randf_range(-6.0, 6.0), _ground_y - _half_height))
-	elif _colony != null and not is_nan(_colony.skirmish_x) and role in [Role.FORAGER, Role.WORKER] 			and (_to_fight or _rng.randf() < 0.6):
+	elif _to_mob and _colony != null and _colony.threat != null:
+		_state_timer = 20.0
+		_path.append(Vector2(_colony.threat.position.x + _rng.randf_range(-12.0, 12.0), _ground_y - _half_height))
+	elif _colony != null and not is_nan(_colony.skirmish_x) and role in [Role.FORAGER, Role.WORKER] \
+			and (_to_fight or _rng.randf() < 0.6):
 		_to_fight = true
 		_state_timer = 20.0
 		_path.append(Vector2(_fight_spot(), _ground_y - _half_height))
-	elif _colony != null and not is_nan(_colony.aphid_x) and not _colony.winter 			and role in [Role.FORAGER, Role.WORKER] and _rng.randf() < 0.4:
+	elif _colony != null and not is_nan(_colony.aphid_x) and not _colony.winter \
+			and role in [Role.FORAGER, Role.WORKER] and _rng.randf() < 0.4:
 		# garden ants herd aphids on a nearby plant and milk them for honeydew
 		_to_aphids = true
 		_state_timer = 60.0
@@ -768,6 +800,8 @@ func _update_surface(delta: float) -> void:
 		_fight_left = -1.0
 		_drink_target = null
 		_drink_left = -1.0
+		_to_mob = false
+		_mob_left = -1.0
 		_path.clear()
 		_state_timer = 0.0
 	if not _follow_path(delta):
@@ -775,6 +809,8 @@ func _update_surface(delta: float) -> void:
 	if _to_aphids and not _returning and _update_aphids(delta):
 		return
 	if _to_fight and not _returning and _update_fight(delta):
+		return
+	if _to_mob and not _returning and _update_mob(delta):
 		return
 	if _drink_target != null and not _returning and _update_drink(delta):
 		return
@@ -812,7 +848,13 @@ func _update_surface(delta: float) -> void:
 	_pause_timer -= delta
 	if _pause_timer <= 0.0:
 		_pause_timer = _rng.randf_range(0.3, 1.8)
-		if _colony != null and _colony.water != null and not has_crop() and _drink_target == null 				and _rng.randf() < 0.5:
+		if _colony != null and _colony.threat != null and role != Role.NURSE \
+				and absf(_colony.threat.position.x - position.x) < 260.0 and _rng.randf() < 0.6:
+			_to_mob = true  # an intruder near the nest: go for it
+			_path.append(Vector2(_colony.threat.position.x + _rng.randf_range(-12.0, 12.0), _ground_y - _half_height))
+			return
+		if _colony != null and _colony.water != null and not has_crop() and _drink_target == null \
+				and _rng.randf() < 0.5:
 			var drop: Node2D = _colony.water.nearest(position.x, 220.0)
 			if drop != null:
 				_drink_target = drop  # thirsty: water beading on the grass after rain
@@ -880,6 +922,35 @@ func _update_aphids(delta: float) -> bool:
 	_colony.count("honeydew")
 	_state_timer = 0.0
 	return false
+
+
+## Mobbing a spider: dash in, bite at its legs, back off, repeat until it bolts.
+func _update_mob(delta: float) -> bool:
+	var spider := _colony.threat
+	if spider == null or not is_instance_valid(spider):
+		_to_mob = false
+		_mob_left = -1.0
+		_sprite.rotation = 0.0
+		_state_timer = minf(_state_timer, 3.0)
+		return false
+	_state_timer = maxf(_state_timer, 5.0)
+	if absf(position.x - spider.position.x) > 16.0:
+		_mob_left = -1.0
+		_path.append(Vector2(spider.position.x + _rng.randf_range(-12.0, 12.0), _ground_y - _half_height))
+		return true
+	if _mob_left < 0.0:
+		_mob_left = _rng.randf_range(1.5, 3.5)
+	_facing_left = spider.position.x < position.x
+	_sprite.flip_h = _facing_left
+	_sprite.rotation = sin(age * 16.0) * 0.3  # lunging and biting
+	spider.harass(delta)
+	_mob_left -= delta
+	if _mob_left <= 0.0:
+		_mob_left = -1.0
+		_sprite.rotation = 0.0
+		var back := 14.0 if position.x > spider.position.x else -14.0  # dart back, then go again
+		_path.append(Vector2(position.x + back, _ground_y - _half_height))
+	return true
 
 
 ## At a rain drop: drink for a few seconds, filling the crop to share at home.
