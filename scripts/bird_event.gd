@@ -4,6 +4,7 @@ extends Node2D
 ## early. The colony makes up the loss through its normal brood cycle.
 
 signal ant_taken
+signal scared_off
 
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
 
@@ -145,6 +146,7 @@ func _grab() -> void:
 
 
 func _scare() -> void:
+	scared_off.emit()
 	_fly_off(true)
 
 

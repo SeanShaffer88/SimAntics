@@ -29,6 +29,7 @@ const SURFACE_STEP := 260.0
 const FRAME_TIME := 0.09
 const TURN_RATE := 10.0
 const BASE_SPEED := 46.0
+const GALLERY_FLOOR_OFFSET := 2.5  # px below a gallery's centre line, where the floor is
 
 var state: State = State.IDLE_CHAMBER
 var role: Role = Role.WORKER
@@ -497,8 +498,19 @@ func _travel_to(goal: int) -> void:
 	_goal_node = goal
 	_path.clear()
 	for id in route:
-		_path.append(_tunnels.nodes[id])
+		_path.append(_walk_point(id))
 	state = State.PATROL_TUNNEL
+
+
+## Where an ant actually walks past a node: on the chamber floor in rooms, and a
+## little below the centre line in galleries, so it treads the floor, not mid-air.
+func _walk_point(id: int) -> Vector2:
+	var p: Vector2 = _tunnels.nodes[id]
+	if _tunnels.is_chamber(id):
+		return Vector2(p.x, _tunnels.chamber_floor_y(id) - _half_height)
+	if _tunnels.is_entrance(id):
+		return p
+	return p + Vector2(0.0, GALLERY_FLOOR_OFFSET)
 
 
 func _arrive() -> void:

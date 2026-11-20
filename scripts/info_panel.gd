@@ -22,6 +22,8 @@ var _refresh := 0.0
 var _confirm: ConfirmationDialog
 var _keep_on: CheckButton
 var _speed_buttons: Array[Button] = []
+var _notes_label: Label
+var notes: Callable  # returns recent field-note entries, newest first
 
 
 func setup(stats: Callable, history: Callable, keep_on: bool, speed: float) -> void:
@@ -59,6 +61,18 @@ func _ready() -> void:
 	_graph.custom_minimum_size = Vector2(300, 64)
 	_graph.draw.connect(_draw_graph)
 	box.add_child(_graph)
+	var notes_caption := Label.new()
+	notes_caption.text = "Field notes"
+	notes_caption.add_theme_font_size_override("font_size", 13)
+	notes_caption.add_theme_color_override("font_color", DIM)
+	box.add_child(notes_caption)
+	_notes_label = Label.new()
+	_notes_label.add_theme_font_size_override("font_size", 13)
+	_notes_label.add_theme_color_override("font_color", TEXT)
+	_notes_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_notes_label.custom_minimum_size = Vector2(300, 0)
+	box.add_child(_notes_label)
+
 	# settings: keep the phone awake on a desk, and how fast to watch
 	_keep_on = CheckButton.new()
 	_keep_on.text = "Keep screen on"
@@ -82,6 +96,15 @@ func _ready() -> void:
 		b.button_group = group
 		b.focus_mode = Control.FOCUS_NONE
 		b.custom_minimum_size = Vector2(44, 0)
+		var chosen := StyleBoxFlat.new()  # the selected speed stands out clearly
+		chosen.bg_color = Color("#8a5a2e")
+		chosen.border_color = Color("#f0c080")
+		chosen.set_border_width_all(2)
+		chosen.set_content_margin_all(6)
+		b.add_theme_stylebox_override("pressed", chosen)
+		b.add_theme_stylebox_override("hover_pressed", chosen)
+		b.add_theme_color_override("font_pressed_color", Color.WHITE)
+		b.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
 		b.toggled.connect(func(on: bool):
 			if on:
 				speed_changed.emit(s))
@@ -133,6 +156,23 @@ func _update() -> void:
 	_rows["food"].text = "Food stored: %d" % s["food"]
 	_rows["nest"].text = "Nest dug: %d%%  ·  %d of %d chambers open" % s["nest"]
 	_graph.queue_redraw()
+	if notes.is_valid():
+		var lines: Array[String] = []
+		var now := Time.get_unix_time_from_system()
+		for e: Dictionary in notes.call():
+			lines.append("%s  —  %s" % [_ago(now - float(e["time"])), e["text"]])
+		_notes_label.text = "\n".join(lines) if not lines.is_empty() else "Nothing noted yet."
+
+
+static func _ago(seconds: float) -> String:
+	if seconds < 90.0:
+		return "just now"
+	var minutes := int(seconds / 60.0)
+	if minutes < 60:
+		return "%d min ago" % minutes
+	if minutes < 60 * 48:
+		return "%d h ago" % (minutes / 60)
+	return "%d days ago" % (minutes / 1440)
 
 
 func _draw_graph() -> void:

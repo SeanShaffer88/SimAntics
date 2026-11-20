@@ -87,6 +87,7 @@ func leave_retinue() -> void:
 
 
 signal soil_dumped(x: float)
+signal food_found(kind: String)
 
 ## `saved`: this colony's state from a previous session (see to_save()), or empty for a new
 ## colony. `founding`: a brand-new colony that starts as a queen and her first brood.
@@ -653,6 +654,7 @@ func sense_food(x: float) -> Node2D:
 
 ## A forager came home with a crumb: its trail recruits more nestmates to that food.
 func report_find(cluster: Node2D) -> void:
+	food_found.emit(cluster.kind)
 	var id := cluster.get_instance_id()
 	_recruits[id] = mini(int(_recruits.get(id, 0)) + cluster.recruits_per_trip(), cluster.crumbs)
 

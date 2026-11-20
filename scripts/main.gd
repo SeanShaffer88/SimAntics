@@ -23,6 +23,7 @@ const WeatherScript := preload("res://scripts/weather.gd")
 const SpoilHeapScript := preload("res://scripts/spoil_heap.gd")
 const FOUNDING_WORKERS := 4
 const InfoPanelScript := preload("res://scripts/info_panel.gd")
+const FieldNotes := preload("res://scripts/field_notes.gd")
 const HISTORY_INTERVAL := 60.0  # seconds between population samples for the info graph
 const HISTORY_LENGTH := 180
 const BirdScript := preload("res://scripts/bird_event.gd")
@@ -46,6 +47,7 @@ var _ambience: AmbienceScript
 var _greet_clock := 0.0
 var _autosave_clock := AUTOSAVE_INTERVAL
 var _spoil: SpoilHeapScript
+var notes := FieldNotes.new()
 var _founded_at := 0.0
 var _history: Array = []
 var _history_clock := 5.0
@@ -111,6 +113,10 @@ func _ready() -> void:
 
 	_founded_at = float(saved.get("founded_at", Time.get_unix_time_from_system()))
 	_history = saved.get("history", [])
+	notes.restore(saved.get("notes", {}))
+	_hook_field_notes(founding)
+	if away != "":
+		notes.note(away)
 	_build_info_panel()
 
 	_selector.setup(_surface.preset_names(), _surface.current_preset)
@@ -129,6 +135,7 @@ func _process(delta: float) -> void:
 		_history.append(_worker_count())
 		if _history.size() > HISTORY_LENGTH:
 			_history.pop_front()
+		_note_population(_worker_count())
 	_autosave_clock -= delta
 	if _autosave_clock <= 0.0:
 		_autosave_clock = AUTOSAVE_INTERVAL
@@ -400,7 +407,7 @@ func save_colony() -> void:
 	SaveGame.write({"seed": profile.seed_value, "colony": colony.to_save(), "ants": ants,
 			"time_of_day": _day_night.time_of_day, "spawned": _spawned, "food_drops": _food_save(),
 			"dig": _subterranean.dig_save(), "spoil": _spoil.to_save(),
-			"founded_at": _founded_at, "history": _history})
+			"founded_at": _founded_at, "history": _history, "notes": notes.to_save()})
 
 
 func _restore_ants(saved: Dictionary) -> void:
@@ -588,6 +595,7 @@ func _build_info_panel() -> void:
 	Engine.time_scale = speed
 	panel.setup(_colony_stats, func() -> Array: return _history, keep_on, speed)
 	panel.new_colony_requested.connect(_start_new_colony)
+	panel.notes = func() -> Array: return notes.recent(3)
 	panel.keep_screen_on_changed.connect(func(on: bool):
 		_apply_keep_on(on)
 		_save_setting("display", "keep_screen_on", on))
@@ -731,6 +739,7 @@ func _try_raise_alate() -> bool:
 			else {"name": "male", "size": 0.8, "head": 0.8, "wings": true}
 	var ant := _spawn_ant(caste, AntScript.Role.ALATE, rooms[0], 0.0)
 	ant.make_callow()
+	notes.note("The colony began raising winged queens and males.", "first_alates")
 	return true
 
 
@@ -746,6 +755,7 @@ func _maybe_nuptial_flight() -> void:
 	if alates.size() < FLIGHT_MIN_ALATES:
 		return
 	_announce("Nuptial flight: the winged queens and males are leaving to found new colonies")
+	notes.note("Nuptial flight: %d winged queens and males left to found colonies of their own." % alates.size())
 	var delay := 0.0
 	for ant in alates:
 		delay += _spawn_rng.randf_range(0.8, 3.0)
@@ -769,3 +779,60 @@ func _announce(text: String) -> void:
 	tween.tween_property(_title, "modulate:a", 1.0, 0.8)
 	tween.tween_interval(5.0)
 	tween.tween_property(_title, "modulate:a", 0.0, 1.5)
+
+
+# ---------------------------------------------------------------------------
+# Field notes
+# ---------------------------------------------------------------------------
+
+const FOOD_NAMES := {"sugar": "the sugar", "nectar": "the nectar", "fruit": "the fruit",
+		"protein": "the ladybugs", "seeds": "the seeds"}
+const CHAMBER_NOTES := {
+	"nursery": "Workers finished a new nursery chamber.",
+	"pupae": "A chamber was dug just for the pupae.",
+	"food": "A new food store was dug out.",
+	"fungus": "A chamber was opened for a fungus garden.",
+	"refuse": "The colony dug a refuse chamber, well away from the brood.",
+	"alates": "A chamber for winged alates was dug.",
+	"rest": "Another resting chamber was dug.",
+}
+const POPULATION_MARKS := [10, 25, 40, 60]
+
+
+## Writes the colony's journal as things happen (see field_notes.gd).
+func _hook_field_notes(founding: bool) -> void:
+	if founding:
+		notes.note("A mated queen sealed herself into a small chamber below the surface, with her first brood and a few workers.", "founded")
+	colony.worker_emerged.connect(func(_pos: Vector2, _chamber: int):
+		notes.note("The first new worker emerged, pale and soft.", "first_worker"))
+	_subterranean.chamber_opened.connect(func(id: int):
+		var role: String = _subterranean.chambers[id]["role"]
+		if role == "queen":
+			notes.note("The queen moved down into her deep chamber; nurses carried the brood after her.", "queen_moved")
+		else:
+			notes.note(CHAMBER_NOTES.get(role, "A new chamber was dug.")))
+	_subterranean.entrance_opened.connect(func(_x: float):
+		notes.note("Diggers broke through to the surface: the nest has a new entrance."))
+	colony.food_found.connect(func(kind: String):
+		notes.note("Foragers found %s and began recruiting nestmates." % FOOD_NAMES.get(kind, "food"), "found_" + kind))
+	weather.rain_changed.connect(func(raining: bool):
+		if raining:
+			notes.note("Rain. Every forager hurried home and the colony stayed underground."))
+	bird.ant_taken.connect(func():
+		notes.note("A bird hopped down and carried off a forager."))
+	bird.scared_off.connect(func():
+		notes.note("You startled a hunting bird away."))
+
+
+## Population milestones, checked with each history sample.
+func _note_population(count: int) -> void:
+	for mark in POPULATION_MARKS:
+		if count >= mark:
+			notes.note("The colony reached %d workers." % mark, "pop_%d" % mark)
+	var all_dug := true
+	for id: int in _subterranean.chambers:
+		if not _subterranean.is_dug(id):
+			all_dug = false
+			break
+	if all_dug and _subterranean.chambers.size() > 0:
+		notes.note("Every chamber of the nest has now been dug.", "nest_complete")
