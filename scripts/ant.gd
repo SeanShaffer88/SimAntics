@@ -123,7 +123,9 @@ func setup(tunnels: Tunnels, colony: ColonyScript, species: Dictionary, caste: D
 	_ground_y = ground_y
 	_surface_x_range = surface_x_range
 	_rng.seed = seed_value
-	_frames = ColonyArt.ant_frames(species, caste["size"], caste["head"], caste.get("queen", false),
+	# workers of one caste still vary a little in size (a few size steps keep the art cache small)
+	var size_jitter: float = [0.93, 0.97, 1.0, 1.03, 1.07][_rng.randi() % 5] if not caste.get("queen", false) else 1.0
+	_frames = ColonyArt.ant_frames(species, float(caste["size"]) * size_jitter, caste["head"], caste.get("queen", false),
 			caste.get("wings", false))
 	_frame = _rng.randi_range(0, _frames.size() - 1)
 	_sprite.texture = _frames[_frame]
@@ -212,6 +214,9 @@ func behavior_key() -> String:
 	if state == State.IDLE_CHAMBER and _tunnels.chamber_role(_current_node) == "rest":
 		return "resting"
 	if role == Role.GUARD:
+		if _colony != null and _colony.plug_work and _tunnels.is_entrance(_current_node) == false \
+				and _tunnels.links[Tunnels.ENTRANCE].has(_current_node):
+			return "plugging"
 		return "guarding"
 	return ""
 
@@ -487,7 +492,16 @@ func _next_job() -> void:
 	if age > lifespan and _colony != null and _tunnels.is_chamber(_current_node):
 		_die()
 		return
-	if _colony != null and _callow_left <= 0.0:
+	if _colony != null and _colony.winter and _rng.randf() < 0.75:
+		# overwintering: most of the colony clusters, torpid, in the deep warm chambers
+		var refuge: int = _colony.winter_refuge()
+		if refuge != -1 and refuge != _current_node:
+			_travel_to(refuge)
+			return
+		if refuge == _current_node:
+			_start_idle()
+			return
+	if _colony != null and _callow_left <= 0.0 and not _colony.entrances_closed:
 		# recruited by a nestmate's trail to food on the surface
 		var recruit_chance := {Role.FORAGER: 0.9, Role.WORKER: 0.35, Role.GUARD: 0.2}
 		if _rng.randf() < float(recruit_chance.get(role, 0.0)):
@@ -547,7 +561,11 @@ func _choose_destination() -> int:
 			var night_factor := 1.0
 			if key == "surface" and _colony != null:
 				night_factor = 0.0 if _colony.raining or _colony.winter or not _colony.forage_ok \
-						else (0.15 if _colony.night else 1.0)
+						or _colony.entrances_closed else (0.15 if _colony.night else 1.0)
+			elif _colony != null and _colony.winter and _tunnels.is_chamber(id):
+				# overwintering: the colony packs into the deepest, warmest chambers
+				var depth := clampf((_tunnels.nodes[id].y - _colony.ground_y) / (_colony.nest_bottom - _colony.ground_y), 0.0, 1.0)
+				night_factor = 0.15 + 3.0 * depth * depth
 			weights.append(float(table[key]) * night_factor / ids.size())
 	if options.is_empty():
 		return Tunnels.ENTRANCE

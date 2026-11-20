@@ -186,6 +186,7 @@ func _process(delta: float) -> void:
 	_update_wetness(delta)
 	_update_spider(delta)
 	_update_climate(delta)
+	_update_plugs(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -1072,6 +1073,7 @@ const BEHAVIORS := {
 	"mobbing": ["Mobbing", "Workers swarmed a wolf spider, biting its legs until it fled."],
 	"necrophoresis": ["Necrophoresis", "A worker carried a dead nestmate to the refuse pile, as ants do once a body starts to smell."],
 	"cannibalism": ["Recycling eggs", "Short of protein, a nurse fed an egg to a larva."],
+	"plugging": ["Sealing up", "Guards heaped soil into the entrance to close the nest for the night."],
 	"drinking": ["Drinking", "A forager drank from a raindrop on the grass and carried the water home."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
@@ -1107,13 +1109,16 @@ func _on_ant_inspected(ant: Node2D) -> void:
 const SeasonsScript := preload("res://scripts/seasons.gd")
 ## Behaviours only one species shows; the others never count toward a colony's guide.
 const SPECIES_BEHAVIORS := {"midden": "harvester", "milling": "bigheaded",
-		"hitchhiking": "leafcutter", "aphids": "garden", "skirmish": "pavement"}
+		"hitchhiking": "leafcutter", "aphids": "garden", "skirmish": "pavement",
+		"plugging": ["harvester", "leafcutter"]}
 
 
 func _guide_total() -> int:
 	var total := 0
 	for key in BEHAVIORS:
-		if SPECIES_BEHAVIORS.get(key, profile.species["id"]) == profile.species["id"]:
+		var owner = SPECIES_BEHAVIORS.get(key, profile.species["id"])
+		if (owner is Array and (owner as Array).has(profile.species["id"])) \
+				or (owner is String and owner == profile.species["id"]):
 			total += 1
 	return total
 
@@ -1140,6 +1145,40 @@ func _on_corpse_dumped(x: float, texture: Texture2D) -> void:
 	fade.tween_interval(240.0)
 	fade.tween_property(body, "modulate:a", 0.0, 20.0)
 	fade.tween_callback(body.queue_free)
+
+
+const EntrancePlugsScript := preload("res://scripts/entrance_plugs.gd")
+var _plugs: Node2D
+
+
+## Harvesters and leafcutters seal their entrances at night, in rain and in the cold, once
+## every forager is home, and open them again when it is fine.
+func _update_plugs(delta: float) -> void:
+	if not profile.species.get("plugs_entrances", false):
+		return
+	if _plugs == null:
+		_plugs = EntrancePlugsScript.new()
+		_plugs.name = "EntrancePlugs"
+		add_child(_plugs)
+		move_child(_plugs, _ants.get_index())
+		_plugs.setup(GROUND_Y, profile.soil["strata"][1], profile.seed_value)
+	var open_xs: Array[float] = []
+	for id in _subterranean.open_entrances():
+		open_xs.append(_subterranean.nodes[id].x)
+	_plugs.set_entrances(open_xs)
+	var close := colony.night or colony.raining or colony.winter or not colony.forage_ok
+	_plugs.set_closed(close)
+	_plugs.modulate = colony.surface_tint
+	var outside := 0
+	for ant in _ants.get_children():
+		if ant.state == AntScript.State.FORAGE_SURFACE:
+			outside += 1
+	_plugs.advance(delta, outside == 0)
+	var was := colony.entrances_closed
+	colony.entrances_closed = close and outside == 0
+	colony.plug_work = _plugs.is_working()
+	if _plugs.is_sealed() and not was:
+		notes.note("At dusk the workers plugged the entrances with soil and pebbles, sealing the nest for the night.", "plugged")
 
 
 const ClimateScript := preload("res://scripts/climate.gd")

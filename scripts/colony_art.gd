@@ -230,6 +230,22 @@ static func seed_texture(variant: int) -> ImageTexture:
 		return img)
 
 
+## A stored seed that got damp and germinated: a pale root and a green shoot.
+static func sprouted_seed(variant: int) -> ImageTexture:
+	return _cached("sprout%d" % variant, func() -> Image:
+		var tones := [Color("#a07040"), Color("#c09a5a"), Color("#7a5a36"), Color("#d0b070")]
+		var img := _blank(6, 8)
+		var base: Color = tones[variant % tones.size()]
+		_shade_ellipse(img, Vector2(2.5, 6), Vector2(2.3, 1.6), base, base.darkened(0.45), base.lightened(0.35))
+		img.set_pixel(3, 4, Color("#d8e8a0"))
+		img.set_pixel(3, 3, Color("#7ab848"))
+		img.set_pixel(3, 2, Color("#5a9a34"))
+		img.set_pixel(4, 1, Color("#6aaa40"))
+		img.set_pixel(2, 1, Color("#7ab848"))
+		img.set_pixel(5, 7, Color("#e8e0c8"))  # the root
+		return img)
+
+
 static func prey_bit(variant: int) -> ImageTexture:
 	return _cached("prey%d" % variant, func() -> Image:
 		var img := _blank(9, 6)

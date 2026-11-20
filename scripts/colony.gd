@@ -217,6 +217,9 @@ func food_position_in(chamber: int) -> Vector2:
 
 
 var climate: RefCounted = null  # climate.gd, set by Main
+var entrances_closed := false  # sealed for the night or the weather
+var plug_work := false  # workers are sealing or reopening the entrances right now
+var _sprout_clock := 30.0
 var forage_ok := true  # the surface is within this species' foraging temperatures
 var ground_y := 120.0
 var nest_bottom := 686.0
@@ -427,6 +430,10 @@ func _process(delta: float) -> void:
 	if _tunnels == null:
 		return
 	_clock += delta
+	_sprout_clock -= delta
+	if _sprout_clock <= 0.0:
+		_sprout_clock = 30.0
+		_sprout_damp_seeds()
 	_lay_timer -= delta
 	if _lay_timer <= 0.0:
 		# A full colony keeps raising brood at half pace; old foragers leaving keeps its size steady.
@@ -586,6 +593,44 @@ func _food_source() -> Dictionary:
 	return {"pickup_node": taken["store"], "pickup_pos": item.position, "food": item, "sugar_only": sugar_only}
 
 
+## Seeds stored in damp soil start to germinate. Harvester ants pick sprouting seeds out
+## of their granaries and throw them away, so they don't take root inside the nest.
+func _sprout_damp_seeds() -> void:
+	if _species["food"] != "seeds" or soil_wetness < 0.45:
+		return
+	for id: int in _tunnels.food_items:
+		var items: Array = _tunnels.food_items[id]
+		if items.is_empty() or _rng.randf() > soil_wetness * 0.5:
+			continue
+		var i := _rng.randi() % items.size()
+		var seed: Sprite2D = items[i]
+		if _nutrient(seed) == "sugar":
+			continue
+		items.remove_at(i)
+		seed.texture = ColonyArt.sprouted_seed(_rng.randi_range(0, 3))
+		seed.offset = Vector2(0.0, -seed.texture.get_height() * 0.5)
+		seed.set_meta("kind", "waste")
+		seed.set_meta("sprouted", true)
+		_waste.append(seed)
+		_waste_chamber[seed.get_instance_id()] = id
+		count("sprouted")
+		note.emit("The granary got damp and some seeds began to sprout. The workers picked them out and threw them away.", "sprouted")
+
+
+## A chamber among the deepest third of the nest (not the refuse pile), where the
+## colony huddles through winter, or -1.
+func winter_refuge() -> int:
+	var ids: Array[int] = []
+	for id: int in _tunnels.chambers:
+		if _tunnels.is_dug(id) and _tunnels.chamber_role(id) != "refuse":
+			ids.append(id)
+	if ids.is_empty():
+		return -1
+	ids.sort_custom(func(a: int, b: int) -> bool: return _tunnels.nodes[a].y > _tunnels.nodes[b].y)
+	var deep := ids.slice(0, maxi(2, ids.size() / 3))
+	return deep[_rng.randi() % deep.size()]
+
+
 ## An egg nobody is handling, preferring the nursery pile over the queen's own clutch.
 func _spare_egg() -> Brood:
 	var pick: Brood = null
@@ -641,11 +686,16 @@ func waste_task() -> Dictionary:
 	# Harvester ants carry seed chaff out and dump it on a midden beside the nest
 	# mound; other species keep refuse in a chamber away from the brood.
 	var corpse := _corpse_task()
+	if not corpse.is_empty() and corpse["zone"] == "midden" and entrances_closed:
+		_corpses.append({"sprite": corpse["item"], "chamber": corpse["pickup_node"], "ready": _clock + 30.0})
+		corpse = {}  # the nest is sealed: it waits inside until morning
 	if not corpse.is_empty():
 		count("necrophoresis")
 		return corpse
 	var midden: bool = _species["id"] == "harvester"
 	var dumps := _tunnels.chambers_with_role("refuse")
+	if midden and entrances_closed:
+		return {}  # husks wait inside until the entrances are opened
 	if _waste.is_empty() or (dumps.is_empty() and not midden):
 		return {}
 	var item: Sprite2D = _waste.pop_front()

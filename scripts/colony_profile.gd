@@ -16,7 +16,7 @@ const SETTINGS_PATH := "user://simantics.cfg"
 ##   cocoons  - true where pupae spin cocoons (Formicinae); false = naked pupae
 const SPECIES := [
 	{
-		"id": "harvester", "forage_temp": [16.0, 47.0], "name": "Red Harvester Ant",
+		"id": "harvester", "plugs_entrances": true, "forage_temp": [16.0, 47.0], "name": "Red Harvester Ant",
 		"body": Color("#9c3c18"), "gaster": Color("#8a3014"), "dark": Color("#3e1206"), "light": Color("#e08a58"),
 		"castes": [{"name": "worker", "weight": 1.0, "size": 1.0, "head": 1.1}],
 		"workers": [16, 22], "depth": [0.85, 1.0], "chambers": [7, 10], "shafts": [1, 2],
@@ -35,7 +35,7 @@ const SPECIES := [
 		"speed": 1.1,
 	},
 	{
-		"id": "leafcutter", "forage_temp": [18.0, 34.0], "name": "Leafcutter Ant",
+		"id": "leafcutter", "plugs_entrances": true, "forage_temp": [18.0, 34.0], "name": "Leafcutter Ant",
 		"body": Color("#a0461e"), "gaster": Color("#8c3c18"), "dark": Color("#3a1406"), "light": Color("#e0905a"),
 		"castes": [
 			{"name": "minima", "weight": 0.35, "size": 0.7, "head": 1.0},
