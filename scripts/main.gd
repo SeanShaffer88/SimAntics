@@ -188,6 +188,7 @@ func _process(delta: float) -> void:
 	_update_spider(delta)
 	_update_climate(delta)
 	_update_plugs(delta)
+	_update_flood(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -1163,6 +1164,35 @@ func _on_corpse_dumped(x: float, texture: Texture2D) -> void:
 	fade.tween_interval(240.0)
 	fade.tween_property(body, "modulate:a", 0.0, 20.0)
 	fade.tween_callback(body.queue_free)
+
+
+var _rain_load := 0.0  # how much rain has fallen recently (soil saturation)
+var _flooding := false
+
+
+## A long, heavy downpour saturates the ground and water runs down open entrances into
+## the nest, pooling in the deepest chambers; it soaks away slowly afterwards. Sealed
+## entrances keep it out.
+func _update_flood(delta: float) -> void:
+	if weather == null:
+		return
+	if weather.raining and not weather.snow:
+		_rain_load = minf(200.0, _rain_load + delta * weather.intensity)
+	else:
+		_rain_load = maxf(0.0, _rain_load - delta * 0.5)
+	var sealed: bool = colony.entrances_closed and profile.species.get("plugs_entrances", false)
+	var inflow: bool = weather.raining and not weather.snow and _rain_load > 60.0 and not sealed
+	if inflow:
+		var room := _subterranean.add_flood(delta * 0.006 * weather.intensity)
+		if room != -1 and not _flooding:
+			_flooding = true
+			_announce("Rainwater is pouring into the nest!")
+			notes.note("A long downpour sent water running down the entrance into the nest. It pooled in the deepest chamber, and the ants carried the brood up to dry chambers.", "flood")
+	else:
+		_flooding = false
+		_subterranean.drain_flood(delta * 0.004)
+	if sealed and weather.raining and _rain_load > 60.0:
+		notes.note("Heavy rain, but the entrances were plugged: no water got into the nest.", "flood_sealed")
 
 
 const EntrancePlugsScript := preload("res://scripts/entrance_plugs.gd")

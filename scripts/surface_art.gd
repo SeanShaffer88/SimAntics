@@ -72,6 +72,14 @@ static func _px(img: Image, x: int, y: int, c: Color) -> void:
 		img.fill_rect(Rect2i(x * SS, y * SS, SS, SS), c)
 
 
+## Paints a single full-resolution pixel at layout coordinates (fine detail).
+static func _fine(img: Image, x: float, y: float, c: Color) -> void:
+	var xx := floori(x * SS)
+	var yy := floori(y * SS)
+	if xx >= 0 and yy >= 0 and xx < img.get_width() and yy < img.get_height():
+		img.set_pixel(xx, yy, c)
+
+
 ## Blends `c` over what is already there (for soft edges and haze).
 static func _blend(img: Image, x: int, y: int, c: Color, amount: float) -> void:
 	if x >= 0 and y >= 0 and x * SS < img.get_width() and y * SS < img.get_height():
@@ -327,20 +335,26 @@ static func _ferns(img: Image, width: int, ground_row: int, entrance_col: int, r
 		if _near_entrance(x, entrance_col, 18 * D):
 			continue
 		var h := rng.randi_range(8, 14)
-		for k in h - 4:
-			_px(img, x, ground_row - 1 - k, PixelArt.FERN_DARK)
+		for k in (h - 4) * SS:  # the central stalk, one full-resolution pixel wide
+			_fine(img, x + 0.25, ground_row - 0.5 - k / float(SS), PixelArt.FERN_DARK)
 		for side: int in [-1, 1]:
 			for frond in 2:
 				var length := rng.randi_range(10, 18) - frond * 4
 				var frond_h := h - frond * 4
-				for t in length:
-					var u := float(t) / length
+				# an arching frond with paired leaflets that shrink toward the tip
+				for step in length * SS:
+					var t := step / float(SS)
+					var u := t / length
 					var lift := frond_h * (1.0 - pow(2.0 * u - 0.6, 2.0))
-					var y := ground_row - 1 - maxi(0, roundi(lift))
-					_px(img, x + side * t, y, PixelArt.FERN_DARK)
-					if t % 2 == 1:  # leaflets, lighter on top
-						_px(img, x + side * t, y - 1, PixelArt.FERN_LIGHT)
-						_px(img, x + side * t, y + 1, PixelArt.FERN_DARK.darkened(0.2))
+					var fx := x + side * t
+					var fy := ground_row - 1.0 - maxf(0.0, lift)
+					_fine(img, fx, fy, PixelArt.FERN_DARK)
+					if step % 3 == 1:
+						var leaf := (1.0 - u) * 2.5 + 0.5
+						for k in int(leaf * SS):
+							var d := k / float(SS)
+							_fine(img, fx + side * d * 0.3, fy - d, PixelArt.FERN_LIGHT.lerp(PixelArt.FERN_DARK, d / leaf))
+							_fine(img, fx + side * d * 0.3, fy + d * 0.6, PixelArt.FERN_DARK.darkened(0.15))
 
 
 static func _leaf_litter(img: Image, width: int, ground_row: int, entrance_col: int, rng: RandomNumberGenerator) -> void:

@@ -138,11 +138,11 @@ func _draw() -> void:
 		var d := _drops[i]
 		if d.y > 0.0:
 			if snow:
-				draw_rect(Rect2(roundf(d.x), roundf(d.y), 2.0, 2.0), SNOW_COLOR)
+				draw_circle(Vector2(d.x, d.y), 1.1 + fmod(d.z, 0.6), SNOW_COLOR, true, -1.0, true)
 			else:
-				draw_rect(Rect2(roundf(d.x), roundf(d.y), 1.0, 5.0), DROP_COLOR)
+				draw_line(Vector2(d.x, d.y), Vector2(d.x + 0.6, d.y + 5.0), DROP_COLOR, 1.0, true)
 	for s in _splashes:
 		var spread := 1.0 + s.z * 12.0
 		var a := (1.0 - s.z / 0.25) * 0.6
-		draw_rect(Rect2(s.x - spread, s.y - 2.0, 1.0, 1.0), Color(DROP_COLOR, a))
-		draw_rect(Rect2(s.x + spread, s.y - 2.0, 1.0, 1.0), Color(DROP_COLOR, a))
+		draw_circle(Vector2(s.x - spread, s.y - 2.0 - s.z * 6.0), 0.7, Color(DROP_COLOR, a), true, -1.0, true)
+		draw_circle(Vector2(s.x + spread, s.y - 2.0 - s.z * 6.0), 0.7, Color(DROP_COLOR, a), true, -1.0, true)

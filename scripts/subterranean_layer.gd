@@ -47,6 +47,10 @@ var _wall_noise := FastNoiseLite.new()
 const BuriedLife := preload("res://scripts/buried_life.gd")
 const StonesLayer := preload("res://scripts/stones_layer.gd")
 var _stones: Node2D
+const FloodWater := preload("res://scripts/flood_water.gd")
+var flood: Dictionary = {}  # chamber id -> water level (0 dry .. 1 full to the roof)
+var _water: Node2D
+var _queen_refuge_from := -1  # the queen's own chamber while she sheltered from a flood
 var life: Node2D  # creatures in the soil (buried_life.gd)
 var _gen: RefCounted
 var expansions := 0  # times the colony has extended the nest past its first plan
@@ -125,6 +129,10 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	_stones.setup(stones, float(px), soil_top, func(p: Vector2) -> bool: return not is_solid(p))
 	add_child(life)
 	move_child(life, _stones.get_index() + 1)
+	_water = FloodWater.new()
+	_water.name = "FloodWater"
+	add_child(_water)  # above the items, below the ants
+	_water.setup(self)
 	life.build(func(p: Vector2) -> bool:
 		# already dug into (or right beside): found long ago
 		for k in 9:
@@ -183,11 +191,61 @@ func chamber_role(id: int) -> String:
 func chambers_with_role(role: String) -> Array[int]:
 	var ids: Array[int] = []
 	for id: int in chambers:
-		if chambers[id]["role"] == role and is_dug(id):
+		if chambers[id]["role"] == role and is_dug(id) and not is_flooded(id):
 			ids.append(id)
 	if ids.is_empty() and role == "nursery":
-		ids.append(_queen_home)
+		ids.append(_queen_home if not is_flooded(_queen_home) else highest_dry_chamber())
 	return ids
+
+
+## True while water stands deep enough in a chamber that the ants keep out of it.
+func is_flooded(id: int) -> bool:
+	return float(flood.get(id, 0.0)) > 0.3
+
+
+## The highest open chamber not under water (where brood and the queen shelter).
+func highest_dry_chamber() -> int:
+	var best := _queen_home
+	var best_y := INF
+	for id: int in chambers:
+		if is_dug(id) and not is_flooded(id) and nodes[id].y < best_y:
+			best_y = nodes[id].y
+			best = id
+	return best
+
+
+## Rain pouring in fills the deepest open chamber first, then the next. Returns the
+## chamber that took the water, or -1.
+func add_flood(amount: float) -> int:
+	var order: Array[int] = []
+	for id: int in chambers:
+		if is_dug(id):
+			order.append(id)
+	order.sort_custom(func(a: int, b: int) -> bool: return chamber_floor_y(a) > chamber_floor_y(b))
+	for id in order:
+		var level := float(flood.get(id, 0.0))
+		if level < 0.7:
+			flood[id] = minf(0.7, level + amount)
+			_shelter_queen()
+			return id
+	return -1
+
+
+## Standing water slowly soaks away into the soil.
+func drain_flood(amount: float) -> void:
+	for id: int in flood.keys():
+		flood[id] = float(flood[id]) - amount
+		if float(flood[id]) <= 0.0:
+			flood.erase(id)
+	if _queen_refuge_from != -1 and not flood.has(_queen_refuge_from):
+		_move_queen(_queen_refuge_from)  # the water is gone: she goes back down
+		_queen_refuge_from = -1
+
+
+func _shelter_queen() -> void:
+	if _queen_refuge_from == -1 and float(flood.get(_queen_home, 0.0)) > 0.35:
+		_queen_refuge_from = _queen_home
+		_move_queen(highest_dry_chamber())  # the workers hurry her up to a dry chamber
 
 
 func chamber_floor_y(id: int) -> float:

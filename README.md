@@ -17,6 +17,7 @@ A passive, observational ant-farm simulation for Android, built in Godot 4.7.2 (
 - **Disease and social immunity.** In damp weather foragers can come home dusted with fungal spores (a green tint). Nestmates that meet them groom the spores off; one left too long falls sick and walks out of the nest to die alone, protecting the colony.
 - **Life in the soil.** Scarab grubs, wireworms, moth pupae, ground beetles and earthworms live in small cells in the soil. When the diggers break into one, helpless larvae and pupae are cut up and carried to the stores as protein; beetles and worms burrow away.
 - **Art.** Ants, brood and nest items are drawn at twice screen resolution from smooth, anti-aliased shapes; the soil is drawn by a shader with smooth tunnel walls and fine sand grain; the surface scenery is painted at full resolution.
+- **Floods.** A long, heavy downpour runs down open entrances and floods the deepest chambers; ants carry the brood up to dry rooms, the queen moves up, and the water soaks away. Plugged entrances keep it out.
 - **Founding and digging.** A new colony starts as a founding queen, her first brood and four workers in one small chamber. Workers dig the rest of the nest out over time:
   - Each soil pellet they carry out lands on a growing mound.
   - Chambers widen as they're dug.

@@ -813,6 +813,8 @@ func _start_idle() -> void:
 
 func _update_idle(delta: float) -> void:
 	_state_timer -= delta
+	if _tunnels.is_flooded(_current_node) and not _on_wall:
+		_state_timer = minf(_state_timer, 0.0)  # water rising: get out
 	if not _follow_path(delta):
 		return
 	if _state_timer <= 0.0:
