@@ -166,7 +166,12 @@ func _clamped(pos: Vector2, zoom: float) -> Vector2:
 # Inspecting
 # ---------------------------------------------------------------------------
 
+var bird: Node2D  # taps on the bird startle it instead of inspecting
+
+
 func _inspect(world: Vector2) -> void:
+	if bird != null and bird.try_tap(world):
+		return
 	var best: Node2D = null
 	var best_d := PICK_RADIUS / maxf(1.0, _camera.zoom.x * 0.6)
 	for ant: Node2D in _ants.get_children():

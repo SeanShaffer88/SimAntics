@@ -64,6 +64,7 @@ var _trail: Node2D  # optional surface pheromone layer (has add_point)
 var _trail_clock := 0.0
 var _food_target: Node2D  # a food drop on the surface this ant is heading for
 var _harvest_left := -1.0
+var _snatched := false
 var _task: Dictionary = {}
 var _task_stage := 0
 var _carried: Sprite2D
@@ -188,6 +189,22 @@ func make_callow() -> void:
 	_state_timer = _rng.randf_range(8.0, 15.0)
 
 
+## True for a worker out on the open surface (where a bird can reach it).
+func is_exposed() -> bool:
+	return state == State.FORAGE_SURFACE and position.y < _ground_y and not _snatched
+
+
+## Caught by a bird: the ant stops and goes limp; the bird carries it off.
+func snatch() -> void:
+	_snatched = true
+	set_process(false)
+	if _carried != null:
+		_carried.queue_free()
+		_carried = null
+	_sprite.texture = _frames[0]
+	_sprite.rotation = 0.0
+
+
 ## An old forager that will not come back from its next trip outside.
 func depart() -> void:
 	_departing = true
@@ -306,7 +323,9 @@ func _choose_destination() -> int:
 		ids.erase(_current_node)
 		for id in ids:
 			options.append(id)
-			var night_factor := 0.15 if key == "surface" and _colony != null and _colony.night else 1.0
+			var night_factor := 1.0
+			if key == "surface" and _colony != null:
+				night_factor = 0.0 if _colony.raining else (0.15 if _colony.night else 1.0)
 			weights.append(float(table[key]) * night_factor / ids.size())
 	if options.is_empty():
 		return Tunnels.ENTRANCE
@@ -443,6 +462,12 @@ func _start_surface_trip() -> void:
 
 func _update_surface(delta: float) -> void:
 	_state_timer -= delta
+	if _colony != null and _colony.raining and not _returning and not _departing:
+		# rain: drop whatever it was doing and hurry home
+		_food_target = null
+		_harvest_left = -1.0
+		_path.clear()
+		_state_timer = 0.0
 	if not _follow_path(delta):
 		return
 	if not _returning and _food_target != null and _update_harvest(delta):

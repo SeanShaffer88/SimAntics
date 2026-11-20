@@ -54,6 +54,7 @@ var max_workers := 30
 var population := 0  # current worker count, kept up to date by Main
 var surface_tint := Color.WHITE  # daylight colour, set by the day/night cycle
 var night := false  # fewer ants go out after dark
+var raining := false  # nobody goes out in the rain; food on the surface waits
 var stats := {}  # job counters, handy for tuning: "<type>_given" / "<type>_done"
 
 var _tunnels: Tunnels
@@ -533,6 +534,8 @@ func add_cluster(cluster: Node2D) -> void:
 ## The most tempting food a surface ant at `x` can sense, or null. Stronger foods are
 ## noticed from further away and win over closer, plainer ones.
 func sense_food(x: float) -> Node2D:
+	if raining:
+		return null
 	var best: Node2D = null
 	var best_score := 0.0
 	for c in clusters:
@@ -557,7 +560,7 @@ func report_find(cluster: Node2D) -> void:
 
 ## A food that still needs hands, for an ant leaving the nest, or null.
 func take_recruit() -> Node2D:
-	if night:
+	if night or raining:
 		return null
 	var options: Array[Node2D] = []
 	for c in clusters:

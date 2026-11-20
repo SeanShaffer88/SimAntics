@@ -752,3 +752,69 @@ static func paint_tunnels(img: Image, mask: PackedByteArray, rng: RandomNumberGe
 				img.set_pixel(x, y, img.get_pixel(x, y).darkened(0.35))
 			elif air_side:
 				img.set_pixel(x, y, img.get_pixel(x, y).darkened(0.2))
+
+
+# ---------------------------------------------------------------------------
+# Bird (a small sparrow-like songbird), facing right
+# ---------------------------------------------------------------------------
+
+const BIRD_PERCHED := [
+	"..........hh..",
+	".........hheh.",
+	"........hhhhhb",
+	"..ttwwwwwhhhh.",
+	".ttwwwwwwcccc.",
+	"tt.wwwwwwccc..",
+	"....wwwwccc...",
+	".....l...l....",
+	".....l...l....",
+]
+const BIRD_HOP := [
+	"..........hh..",
+	".........hheh.",
+	"........hhhhhb",
+	"..ttwwwwwhhhh.",
+	".ttwwwwwwcccc.",
+	"tt.wwwwwwccc..",
+	"....wwwwccc...",
+	"....l.....l...",
+	"..............",
+]
+const BIRD_FLAP_UP := [
+	"....ww........",
+	"....www...hh..",
+	".....www.hheh.",
+	"......wwhhhhhb",
+	"..tt.wwwwhhhh.",
+	".ttwwwwwwcccc.",
+	"tt..wwwwccc...",
+	"..............",
+	"..............",
+]
+const BIRD_FLAP_DOWN := [
+	"..........hh..",
+	".........hheh.",
+	"........hhhhhb",
+	"..ttwwwwwhhhh.",
+	".ttwwwwwwcccc.",
+	"tt..wwwwccc...",
+	".....www......",
+	"......www.....",
+	".......ww.....",
+]
+const BIRD_PALETTE := {
+	"h": Color("#7a5a3a"), "e": Color("#101010"), "b": Color("#e0b040"), "t": Color("#5a4028"),
+	"w": Color("#9a7448"), "c": Color("#e8dcc4"), "l": Color("#c8a070"),
+}
+
+static var _bird_frames: Dictionary = {}
+
+
+## Bird frames: "perched", "hop", "flap_up", "flap_down".
+static func bird_frame(pose: String) -> ImageTexture:
+	if _bird_frames.is_empty():
+		_bird_frames["perched"] = texture_from_rows(BIRD_PERCHED, BIRD_PALETTE)
+		_bird_frames["hop"] = texture_from_rows(BIRD_HOP, BIRD_PALETTE)
+		_bird_frames["flap_up"] = texture_from_rows(BIRD_FLAP_UP, BIRD_PALETTE)
+		_bird_frames["flap_down"] = texture_from_rows(BIRD_FLAP_DOWN, BIRD_PALETTE)
+	return _bird_frames[pose]

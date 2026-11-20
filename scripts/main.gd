@@ -19,6 +19,8 @@ const SaveGame := preload("res://scripts/save_game.gd")
 const FoodClusterScript := preload("res://scripts/food_cluster.gd")
 const FoodDockScript := preload("res://scripts/food_dock.gd")
 const MAX_FOOD_DROPS := 6
+const WeatherScript := preload("res://scripts/weather.gd")
+const BirdScript := preload("res://scripts/bird_event.gd")
 const AUTOSAVE_INTERVAL := 30.0
 const MIN_AWAY := 60.0  # shorter absences are not worth a catch-up message
 
@@ -38,6 +40,8 @@ var _day_night: DayNightScript
 var _ambience: AmbienceScript
 var _greet_clock := 0.0
 var _autosave_clock := AUTOSAVE_INTERVAL
+var weather: WeatherScript
+var bird: BirdScript
 var _food_layer: Node2D
 var _dock: FoodDockScript
 var _observer: ObserverScript
@@ -85,6 +89,10 @@ func _process(delta: float) -> void:
 		save_colony()
 	if _ambience != null and _day_night != null:
 		_ambience.night_level = 1.0 - _day_night.daylight
+	if weather != null:
+		colony.raining = weather.raining
+		_day_night.overcast = weather.intensity
+		_ambience.rain_level = weather.intensity
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -141,6 +149,19 @@ func _build_ambiance() -> void:
 	move_child(observer, _ants.get_index() + 1)
 	observer.setup(camera, _ants, _subterranean, label, VIEW_SIZE)
 	_build_food_dock(observer)
+
+	weather = WeatherScript.new()
+	weather.name = "Weather"
+	add_child(weather)
+	move_child(weather, _day_night.get_index() + 1)  # rain falls in front of the sky, behind the ants
+	weather.setup(GROUND_Y, VIEW_SIZE.x, profile.seed_value)
+
+	bird = BirdScript.new()
+	bird.name = "Bird"
+	add_child(bird)
+	move_child(bird, observer.get_index())  # above the ants it hunts
+	bird.setup(_ants, colony, _day_night, GROUND_Y, VIEW_SIZE.x, profile.seed_value)
+	observer.bird = bird
 
 	# warm desk-lamp falloff: the middle of the farm glows, the corners sink into shadow
 	var shade := CanvasLayer.new()

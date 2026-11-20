@@ -11,6 +11,9 @@ const STAR_COUNT := 70
 
 var time_of_day := 0.3  # 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk
 var daylight := 1.0
+var overcast := 0.0  # 0..1 from the weather: dulls the sky and hides the stars
+
+const OVERCAST_TINT := Color(0.6, 0.64, 0.7)
 
 var _surface: CanvasItem
 var _colony: Node
@@ -34,7 +37,8 @@ func _process(delta: float) -> void:
 	var sun := sin((time_of_day - 0.25) * TAU)  # +1 at noon, -1 at midnight
 	daylight = smoothstep(-0.25, 0.35, sun)
 	var warmth := clampf(1.0 - absf(sun) * 3.0, 0.0, 1.0)  # strongest at sunrise and sunset
-	var tint := NIGHT_TINT.lerp(DAY_TINT, daylight).lerp(DUSK_TINT, warmth * 0.6)
+	var tint := NIGHT_TINT.lerp(DAY_TINT, daylight).lerp(DUSK_TINT, warmth * 0.6 * (1.0 - overcast))
+	tint = tint * OVERCAST_TINT.lerp(Color.WHITE, 1.0 - overcast * 0.8)
 	_surface.modulate = tint
 	if _colony != null:
 		_colony.surface_tint = tint
@@ -43,7 +47,7 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	var visible := 1.0 - daylight
+	var visible := (1.0 - daylight) * (1.0 - overcast)
 	if visible <= 0.02:
 		return
 	var t := Time.get_ticks_msec() / 1000.0

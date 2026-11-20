@@ -6,6 +6,8 @@ const MIX_RATE := 22050.0
 const CRICKET_HZ := 4300.0
 
 var night_level := 0.0  # 0 by day, 1 at full night (set from the day/night cycle)
+var rain_level := 0.0  # 0 dry, 1 full shower (set from the weather)
+var _rain := 0.0
 var muted := false:
 	set(value):
 		muted = value
@@ -48,6 +50,14 @@ func _process(_delta: float) -> void:
 		var wind := _wind_slow * gust * (1.0 - night_level * 0.6) * 0.9
 		var left := wind
 		var right := wind
+		if rain_level > 0.01:
+			# rain: soft hiss with the odd heavier drop
+			_rain += (_rng.randf_range(-1.0, 1.0) - _rain) * 0.35
+			var hiss := _rain * 0.16 * rain_level
+			if _rng.randf() < 0.0004 * rain_level:
+				hiss += _rng.randf_range(0.15, 0.3) * rain_level
+			left += hiss
+			right += hiss * _rng.randf_range(0.8, 1.0)
 		if night_level > 0.01:
 			for c in _crickets:
 				# chirps: trains of three quick pulses, repeating
@@ -56,7 +66,7 @@ func _process(_delta: float) -> void:
 				if cycle < 0.18:
 					var within := fmod(cycle, 0.06) / 0.06
 					pulse = sin(within * PI)
-				var tone := sin(_t * TAU * float(c["hz"])) * pulse * 0.05 * night_level
+				var tone := sin(_t * TAU * float(c["hz"])) * pulse * 0.05 * night_level * (1.0 - rain_level)
 				left += tone * (1.0 - float(c["pan"]))
 				right += tone * (1.0 + float(c["pan"]))
 		_playback.push_frame(Vector2(left, right))
