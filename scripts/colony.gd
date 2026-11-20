@@ -570,6 +570,13 @@ func _food_source() -> Dictionary:
 	# larvae grow on protein; a larva given only sugar is kept alive but does not develop
 	var taken := _take_stored(["protein", "both"])
 	var sugar_only := false
+	if taken.is_empty() and population >= SMALL_COLONY and _rng.randf() < 0.5:
+		var egg := _spare_egg()
+		if egg != null:  # no protein anywhere: an egg becomes a larva's meal
+			brood.erase(egg)
+			egg.sprite.set_meta("kind", "food")
+			egg.sprite.set_meta("cannibal", true)
+			return {"pickup_node": egg.chamber, "pickup_pos": egg.sprite.position, "food": egg.sprite, "cannibal": true}
 	if taken.is_empty():
 		taken = _take_stored(["sugar"])
 		sugar_only = true
@@ -577,6 +584,17 @@ func _food_source() -> Dictionary:
 			return {}
 	var item: Sprite2D = taken["item"]
 	return {"pickup_node": taken["store"], "pickup_pos": item.position, "food": item, "sugar_only": sugar_only}
+
+
+## An egg nobody is handling, preferring the nursery pile over the queen's own clutch.
+func _spare_egg() -> Brood:
+	var pick: Brood = null
+	for b in brood:
+		if b.stage == Stage.EGG and not b.carried and not b.reserved:
+			pick = b
+			if b.zone == "eggs":
+				break
+	return pick
 
 
 ## What a stored food item is worth to the colony: "sugar", "protein" or "both".
@@ -716,6 +734,9 @@ func drop_position(task: Dictionary) -> Vector2:
 	if task["type"] == "feed":
 		var b: Brood = task["brood"]
 		return b.sprite.position
+	if task.has("brood") and task["zone"] == "larvae":
+		var larva: Brood = task["brood"]
+		return _tunnels.zone_spot(task["drop_node"], "larvae", float(larva.fed) / FEEDS_TO_PUPATE)
 	return _tunnels.zone_spot(task["drop_node"], task["zone"])
 
 
@@ -750,6 +771,11 @@ func drop(task: Dictionary, carried: Sprite2D, at: Vector2) -> void:
 				else:
 					b.fed += 1
 					_refresh_texture(b)
+					if b.zone == "larvae" and _tunnels.is_chamber(b.chamber):  # bigger now: nudged outward
+						b.sprite.position = _tunnels.zone_spot(b.chamber, "larvae", float(b.fed) / FEEDS_TO_PUPATE).round()
+				if task.get("cannibal", false):
+					count("ate_eggs")
+					note.emit("Starved of protein, the nurses fed some of the eggs to the larvae. Real colonies recycle eggs like this in lean times.", "egg_cannibalism")
 			_leave_waste(b.chamber, at)
 		"waste":
 			if task["zone"] == "midden":

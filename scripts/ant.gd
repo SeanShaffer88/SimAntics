@@ -184,6 +184,8 @@ func behavior_key() -> String:
 				return "carry_soil"
 			"corpse":
 				return "necrophoresis"
+		if _carried.has_meta("cannibal"):
+			return "cannibalism"
 		return "hitchhiking" if _carried.has_meta("hitchhiker") else "carry_food"
 	if _greet_left > 0.0:
 		return "trophallaxis" if has_crop() else "antennation"
@@ -228,7 +230,7 @@ func describe() -> String:
 			parts.append("Guard")
 		Role.ALATE:
 			parts.append("Winged queen" if caste_name == "alate queen" else "Winged male")
-	if _multi_caste and role != Role.ALATE:
+	if (_multi_caste or caste_name == "nanitic") and role != Role.ALATE:
 		parts.append(caste_name)
 	if role != Role.ALATE:
 		parts.append("%d min old" % maxi(1, int(age / 60.0)))

@@ -413,7 +413,7 @@ func _age_for(role: AntScript.Role) -> float:
 func _on_worker_emerged(pos: Vector2, chamber: int) -> void:
 	if _try_raise_alate():
 		return  # this one emerged with wings
-	var caste: Dictionary = profile.pick_caste(_spawn_rng)
+	var caste := _caste_for_colony()
 	var role := AntScript.Role.GUARD if float(caste["head"]) >= 1.5 else AntScript.Role.NURSE
 	var ant := _spawn_ant(caste, role, chamber, 0.0, pos)
 	ant.make_callow()
@@ -425,6 +425,30 @@ func _on_worker_emerged(pos: Vector2, chamber: int) -> void:
 				oldest = other
 		if oldest != null:
 			oldest.depart()
+
+
+## Which caste a new worker becomes. A founding queen can only raise small "nanitic"
+## workers on her body reserves; big majors and soldiers take a lot of protein as
+## larvae, so they only appear once the colony is established and well fed.
+func _caste_for_colony() -> Dictionary:
+	var castes: Array = profile.species["castes"]
+	var workers := _worker_count()
+	if workers < 10:
+		var smallest: Dictionary = castes[0]
+		for c: Dictionary in castes:
+			if float(c["size"]) < float(smallest["size"]):
+				smallest = c
+		var nanitic := smallest.duplicate()
+		nanitic["name"] = "nanitic"
+		nanitic["size"] = snappedf(float(smallest["size"]) * 0.82, 0.01)
+		nanitic["head"] = minf(float(smallest["head"]), 1.1)
+		return nanitic
+	var caste: Dictionary = profile.pick_caste(_spawn_rng)
+	if float(caste["head"]) >= 1.5 and (workers < 20 or colony.store_counts().y < 4):
+		for c: Dictionary in castes:  # not enough protein for a big-headed larva: a minor instead
+			if float(c["head"]) < 1.5:
+				return c
+	return caste
 
 
 ## Big-headed majors and soldiers guard; small minima tend brood and fungus;
@@ -1047,6 +1071,7 @@ const BEHAVIORS := {
 	"eclosion": ["Helping out", "A nurse helped a new worker out of its pupal case."],
 	"mobbing": ["Mobbing", "Workers swarmed a wolf spider, biting its legs until it fled."],
 	"necrophoresis": ["Necrophoresis", "A worker carried a dead nestmate to the refuse pile, as ants do once a body starts to smell."],
+	"cannibalism": ["Recycling eggs", "Short of protein, a nurse fed an egg to a larva."],
 	"drinking": ["Drinking", "A forager drank from a raindrop on the grass and carried the water home."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],

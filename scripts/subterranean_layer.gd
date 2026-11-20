@@ -515,7 +515,9 @@ func heap_ceiling(id: int) -> float:
 ## Where a new item should sit in a chamber zone. Items heap up toward each zone's centre:
 ##   queen_eggs - beside the queen's gaster   eggs / larvae / pupae - the sorted brood piles
 ##   food - the store heap                    refuse - the waste heap
-func zone_spot(id: int, zone: String) -> Vector2:
+## `ring` (0..1) places larvae by size: small ones beside the egg clump in the middle,
+## big ones out at the edge of the brood pile (brood sorting, as real nurses arrange it).
+func zone_spot(id: int, zone: String, ring: float = 0.0) -> Vector2:
 	var c: Dictionary = chambers[id]
 	var left: float = c["floor_left"]
 	var right: float = c["floor_right"]
@@ -528,20 +530,21 @@ func zone_spot(id: int, zone: String) -> Vector2:
 			center = _queen.position.x - _queen.texture.get_width() * 0.5 - 10.0
 			half = 10.0
 			height = minf(height, 9.0)
-		"eggs":
-			center = left + span * 0.2
-			half = span * 0.13
-			height = minf(height, 10.0)
-		"larvae":
-			center = left + span * 0.52
-			half = span * 0.16
-			height = minf(height, 12.0)
+		"eggs":  # a tight, sticky clump in the middle of the brood pile
+			half = span * 0.07
+			height = minf(height, 8.0)
+		"larvae":  # in rings around the eggs, bigger larvae further out
+			var side := -1.0 if _rng.randf() < 0.5 else 1.0
+			var out := span * (0.1 + 0.24 * clampf(ring, 0.0, 1.0) + _rng.randf_range(-0.03, 0.03))
+			var lx := clampf(center + side * out, left + 2.0, right - 2.0)
+			return Vector2(lx, chamber_floor_y(id) - _rng.randf_range(0.0, minf(height, 5.0)))
 		"pupae":
 			if c["role"] == "pupae":  # a whole chamber given over to pupae
 				half = span * 0.36
-			else:
-				center = left + span * 0.84
-				half = span * 0.12
+			else:  # at the outer edges of the pile
+				var pside := -1.0 if _rng.randf() < 0.5 else 1.0
+				center += pside * span * 0.41
+				half = span * 0.06
 			height = minf(height, 14.0)
 		"food":
 			height = minf(height, 16.0)
