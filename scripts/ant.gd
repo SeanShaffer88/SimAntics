@@ -654,7 +654,9 @@ func _update_surface(delta: float) -> void:
 			_leave_for_good()
 			return
 		_returning = true
-		if role == Role.FORAGER and _colony != null and _task.is_empty() and _rng.randf() < 0.65:
+		# now and then a forager comes back with something small it found off-screen;
+		# most food comes from piles you can see
+		if role == Role.FORAGER and _colony != null and _task.is_empty() and _rng.randf() < 0.25:
 			var find := _colony.forage_task()  # it found something worth carrying home
 			if not find.is_empty():
 				_hold(find["item"])

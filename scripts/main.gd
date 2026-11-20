@@ -125,6 +125,7 @@ func _ready() -> void:
 	_selector.setup(_surface.preset_names(), _surface.current_preset)
 	_selector.preview_requested.connect(_surface.show_preset)
 	_selector.preset_locked.connect(_save_preset)
+	_start_tips()
 	_apply_safe_area()
 	_show_title(away)
 
@@ -150,6 +151,7 @@ func _process(delta: float) -> void:
 		_day_night.overcast = weather.intensity
 		_ambience.rain_level = weather.intensity
 	_update_flights(delta)
+	_update_natural_food(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -576,11 +578,13 @@ func _on_food_tapped(kind: String) -> void:
 	_drop_food(kind, x, -1, true)
 
 
-func _drop_food(kind: String, x: float, crumbs_left: int = -1, animate: bool = false) -> void:
+func _drop_food(kind: String, x: float, crumbs_left: int = -1, animate: bool = false,
+		natural: bool = false) -> void:
 	var drops := _food_layer.get_children()
 	if drops.size() >= MAX_FOOD_DROPS:
 		drops[0].queue_free()  # the oldest pile is cleared away
 	var cluster := FoodClusterScript.new()
+	cluster.set_meta("natural", natural)
 	_food_layer.add_child(cluster)
 	cluster.setup(kind, Vector2(x, GROUND_Y), _spawn_rng.randi(), crumbs_left)
 	colony.add_cluster(cluster)
@@ -594,13 +598,48 @@ func _food_save() -> Array:
 	var drops := []
 	for c in _food_layer.get_children():
 		if not c.is_queued_for_deletion() and not c.is_empty():
-			drops.append({"kind": c.kind, "x": c.position.x, "crumbs": c.crumbs})
+			drops.append({"kind": c.kind, "x": c.position.x, "crumbs": c.crumbs,
+					"natural": c.get_meta("natural", false)})
 	return drops
 
 
 func _food_restore(saved: Dictionary) -> void:
 	for d: Dictionary in saved.get("food_drops", []):
-		_drop_food(d["kind"], float(d["x"]), int(d["crumbs"]))
+		_drop_food(d["kind"], float(d["x"]), int(d["crumbs"]), false, bool(d.get("natural", false)))
+
+
+# Natural food: what the surroundings provide for each species, and how much.
+const NATURAL_FOOD := {"seeds": ["seeds", 12], "prey": ["insects", 10], "fungus": ["leaves", 14]}
+const NATURAL_INTERVAL := Vector2(60.0, 150.0)
+const MAX_NATURAL := 2
+const NATURAL_NOTES := {"seeds": "A seed head dropped its seeds near the nest.",
+		"insects": "A few dead insects lay near the nest.", "leaves": "Fresh leaves lay within reach of the nest."}
+
+var _natural_clock := 20.0
+
+
+## Every so often the surroundings provide a little food, so the colony forages on
+## its own: fallen seeds, dead insects, or leaves for leafcutters to cut.
+func _update_natural_food(delta: float) -> void:
+	if profile == null:
+		return
+	_natural_clock -= delta
+	if _natural_clock > 0.0:
+		return
+	_natural_clock = _spawn_rng.randf_range(NATURAL_INTERVAL.x, NATURAL_INTERVAL.y)
+	var natural := 0
+	for c in _food_layer.get_children():
+		if c.get_meta("natural", false) and not c.is_queued_for_deletion():
+			natural += 1
+	if natural >= MAX_NATURAL:
+		return
+	var spec: Array = NATURAL_FOOD.get(profile.species["food"], ["seeds", 12])
+	var x := _spawn_rng.randf_range(SURFACE_MARGIN + 20.0, VIEW_SIZE.x - SURFACE_MARGIN - 20.0)
+	for ex in _subterranean.entrance_xs:
+		if absf(x - ex) < 40.0:
+			x = clampf(x + 80.0, SURFACE_MARGIN, VIEW_SIZE.x - SURFACE_MARGIN)
+	_drop_food(spec[0], x, spec[1], false, true)
+	notes.note(NATURAL_NOTES.get(spec[0], "Food turned up near the nest."), "natural_" + str(spec[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -863,3 +902,53 @@ func _note_population(count: int) -> void:
 			break
 	if all_dug and _subterranean.chambers.size() > 0:
 		notes.note("Every chamber of the nest has now been dug.", "nest_complete")
+
+
+# ---------------------------------------------------------------------------
+# First-launch tips
+# ---------------------------------------------------------------------------
+
+const TIPS := [
+	"Tap any ant or chamber to see what is going on.",
+	"Tap a food below to drop it on the surface, then watch who finds it.",
+	"Double-tap or pinch to zoom in, and drag to look around.",
+	"Tap the i button for colony stats and field notes.",
+]
+const TIP_START := 8.0
+const TIP_GAP := 15.0
+const TIP_SHOW := 8.0
+
+
+## A few gentle hints, shown once on a player's first launch.
+func _start_tips() -> void:
+	if _load_setting("tips", "shown", false):
+		return
+	var tip := Label.new()
+	tip.name = "Tip"
+	tip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tip.add_theme_font_size_override("font_size", 16)
+	tip.add_theme_color_override("font_color", Color(0.96, 0.9, 0.76))
+	var panel := StyleBoxFlat.new()
+	panel.bg_color = Color(0.1, 0.07, 0.04, 0.82)
+	panel.border_color = Color("#b07c48")
+	panel.set_border_width_all(1)
+	panel.set_content_margin_all(8)
+	tip.add_theme_stylebox_override("normal", panel)
+	tip.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	tip.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	tip.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	tip.offset_bottom = -72.0
+	tip.modulate.a = 0.0
+	$UI.add_child(tip)
+	var seq := create_tween()
+	seq.tween_interval(TIP_START)
+	for text: String in TIPS:
+		seq.tween_callback(func(): tip.text = text)
+		seq.tween_property(tip, "modulate:a", 1.0, 0.6)
+		seq.tween_interval(TIP_SHOW)
+		seq.tween_property(tip, "modulate:a", 0.0, 0.8)
+		seq.tween_interval(TIP_GAP - TIP_SHOW - 1.4)
+	seq.tween_callback(tip.queue_free)
+	if not profile.is_preview:
+		_save_setting("tips", "shown", true)

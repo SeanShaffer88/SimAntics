@@ -718,7 +718,15 @@ func crumb_task(kind: String) -> Dictionary:
 	var targets := _tunnels.chambers_with_role("fungus" if _species["food"] == "fungus" else "food")
 	if targets.is_empty():
 		targets = _tunnels.chambers_with_role("nursery")
-	var item := _tunnels.add_item(ColonyArt.food_crumb(kind, _rng.randi_range(0, 2)), Vector2.ZERO, "food")
+	var tex: Texture2D
+	match kind:
+		"leaves":
+			tex = ColonyArt.leaf_piece(_rng.randi_range(0, 3))
+		"insects":
+			tex = ColonyArt.prey_bit(_rng.randi_range(0, 4))
+		_:
+			tex = ColonyArt.food_crumb(kind, _rng.randi_range(0, 2))
+	var item := _tunnels.add_item(tex, Vector2.ZERO, "food")
 	count("crumb_" + kind)
 	return {"type": "store", "item": item, "drop_node": targets[_rng.randi() % targets.size()], "zone": "food"}
 

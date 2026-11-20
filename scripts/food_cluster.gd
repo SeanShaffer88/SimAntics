@@ -16,6 +16,8 @@ const KINDS := {
 	"fruit": {"pull": 0.7, "crumbs": 24, "recruits": 2, "harvest": 1.4},
 	"protein": {"pull": 0.55, "crumbs": 20, "recruits": 2, "harvest": 2.2},
 	"seeds": {"pull": 0.35, "crumbs": 26, "recruits": 1, "harvest": 1.8},
+	"leaves": {"pull": 0.6, "crumbs": 14, "recruits": 2, "harvest": 2.4},  # leafcutters cut pieces to carry
+	"insects": {"pull": 0.5, "crumbs": 10, "recruits": 2, "harvest": 2.0},  # natural finds for predators
 }
 const PIXEL := 2  # matches the surface art's chunky pixels
 
@@ -96,4 +98,8 @@ static func _colors(food_kind: String) -> Array[Color]:
 			return [Color("#f07828"), Color("#e04030"), Color("#f8a040"), Color("#fff0d8"), Color("#6aa040")]
 		"protein":  # a little pile of dead ladybugs: red shells, black spots and heads
 			return [Color("#d02818"), Color("#e04030"), Color("#d02818"), Color("#201818"), Color("#ff7058")]
+		"leaves":
+			return [Color("#5a9a3a"), Color("#6aa848"), Color("#4a8a34"), Color("#8ab84a")]
+		"insects":  # natural finds: a few dead insects, browns and blacks
+			return [Color("#3a2a1a"), Color("#5a4a20"), Color("#2a2020"), Color("#6a5030")]
 	return [Color("#a07040"), Color("#c09a5a"), Color("#7a5a36"), Color("#d0b070")]
