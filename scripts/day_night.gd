@@ -12,6 +12,7 @@ const STAR_COUNT := 70
 var time_of_day := 0.3  # 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk
 var daylight := 1.0
 var overcast := 0.0  # 0..1 from the weather: dulls the sky and hides the stars
+var season_tint := Color.WHITE  # a gentle seasonal cast over the surface
 
 const OVERCAST_TINT := Color(0.6, 0.64, 0.7)
 
@@ -38,7 +39,7 @@ func _process(delta: float) -> void:
 	daylight = smoothstep(-0.25, 0.35, sun)
 	var warmth := clampf(1.0 - absf(sun) * 3.0, 0.0, 1.0)  # strongest at sunrise and sunset
 	var tint := NIGHT_TINT.lerp(DAY_TINT, daylight).lerp(DUSK_TINT, warmth * 0.6 * (1.0 - overcast))
-	tint = tint * OVERCAST_TINT.lerp(Color.WHITE, 1.0 - overcast * 0.8)
+	tint = tint * OVERCAST_TINT.lerp(Color.WHITE, 1.0 - overcast * 0.8) * season_tint
 	_surface.modulate = tint
 	if _colony != null:
 		_colony.surface_tint = tint

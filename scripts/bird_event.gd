@@ -80,7 +80,7 @@ func _process(delta: float) -> void:
 		State.WAITING:
 			_clock -= delta
 			if _clock <= 0.0:
-				var calm: bool = not _colony.raining and _day_night.daylight > 0.6
+				var calm: bool = not _colony.raining and not _colony.winter and _day_night.daylight > 0.6
 				if not (calm and visit_now()):
 					_clock = RETRY
 		State.SWOOP:

@@ -451,7 +451,7 @@ func _choose_destination() -> int:
 			options.append(id)
 			var night_factor := 1.0
 			if key == "surface" and _colony != null:
-				night_factor = 0.0 if _colony.raining else (0.15 if _colony.night else 1.0)
+				night_factor = 0.0 if _colony.raining or _colony.winter else (0.15 if _colony.night else 1.0)
 			weights.append(float(table[key]) * night_factor / ids.size())
 	if options.is_empty():
 		return Tunnels.ENTRANCE
@@ -603,6 +603,8 @@ func _start_idle() -> void:
 		# Real colonies have many idle workers; in rest chambers they settle for a long while.
 		var resting := _tunnels.chamber_role(_current_node) == "rest"
 		_state_timer = _rng.randf_range(15.0, 40.0) if resting else _rng.randf_range(5.0, 15.0)
+		if _colony != null and _colony.winter:
+			_state_timer *= 2.5  # torpid in the cold: long rests
 		_path.append(_tunnels.random_floor_point(_current_node, _rng, _half_height))
 	else:
 		_state_timer = _rng.randf_range(1.5, 5.0)  # inspecting a dig face or standing guard
@@ -663,7 +665,7 @@ func _start_surface_trip() -> void:
 
 func _update_surface(delta: float) -> void:
 	_state_timer -= delta
-	if _colony != null and _colony.raining and not _returning and not _departing:
+	if _colony != null and (_colony.raining or _colony.winter) and not _returning and not _departing:
 		# rain: drop whatever it was doing and hurry home
 		_food_target = null
 		_harvest_left = -1.0
@@ -761,7 +763,7 @@ func _leave_for_good() -> void:
 ## Advances along _path; returns true once the path is empty.
 func _follow_path(delta: float) -> bool:
 	_moving = false
-	var step := _speed * delta
+	var step := _speed * delta * (0.6 if _colony != null and _colony.winter else 1.0)  # cold ants are slow
 	while step > 0.0 and not _path.is_empty():
 		var to_target := _path[0] - position
 		var dist := to_target.length()

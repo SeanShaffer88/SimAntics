@@ -52,6 +52,7 @@ var _autosave_clock := AUTOSAVE_INTERVAL
 var _spoil: SpoilHeapScript
 var notes := FieldNotes.new()
 var _founded_at := 0.0
+var _away_days := 0  # whole days that passed while the app was closed
 var _history: Array = []
 var _history_clock := 5.0
 var weather: WeatherScript
@@ -117,6 +118,8 @@ func _ready() -> void:
 	_founded_at = float(saved.get("founded_at", Time.get_unix_time_from_system()))
 	_history = saved.get("history", [])
 	notes.restore(saved.get("notes", {}))
+	saved["day"] = int(saved.get("day", 0)) + _away_days
+	_build_seasons(saved)
 	_hook_field_notes(founding)
 	if away != "":
 		notes.note(away)
@@ -149,7 +152,7 @@ func _process(delta: float) -> void:
 	if weather != null:
 		colony.raining = weather.raining
 		_day_night.overcast = weather.intensity
-		_ambience.rain_level = weather.intensity
+		_ambience.rain_level = 0.0 if weather.snow else weather.intensity  # snow falls silently
 	_update_flights(delta)
 	_update_natural_food(delta)
 	_greet_clock -= delta
@@ -439,7 +442,7 @@ func save_colony() -> void:
 	SaveGame.write({"seed": profile.seed_value, "colony": colony.to_save(), "ants": ants,
 			"time_of_day": _day_night.time_of_day, "spawned": _spawned, "food_drops": _food_save(),
 			"dig": _subterranean.dig_save(), "spoil": _spoil.to_save(),
-			"founded_at": _founded_at, "history": _history, "notes": notes.to_save()})
+			"founded_at": _founded_at, "history": _history, "notes": notes.to_save(), "day": seasons.day})
 
 
 func _restore_ants(saved: Dictionary) -> void:
@@ -486,6 +489,7 @@ func _catch_up(saved: Dictionary) -> String:
 		if float(e["age"]) < AntScript.CALLOW_TIME:
 			ant.make_callow()
 		emerged += 1
+	_away_days = int(_day_night.time_of_day + simulated / DayNightScript.CYCLE)  # midnights passed
 	_day_night.time_of_day = fmod(_day_night.time_of_day + simulated / DayNightScript.CYCLE, 1.0)
 	var parts: Array[String] = []
 	if int(report["laid"]) > 0:
@@ -630,6 +634,11 @@ func _update_natural_food(delta: float) -> void:
 	if _natural_clock > 0.0:
 		return
 	_natural_clock = _spawn_rng.randf_range(NATURAL_INTERVAL.x, NATURAL_INTERVAL.y)
+	if seasons != null:
+		if seasons.is_winter():
+			return  # nothing turns up under the snow
+		if seasons.season() == SeasonsScript.AUTUMN:
+			_natural_clock *= 0.6  # seeds and windfall: autumn is a time of plenty
 	var natural := 0
 	for c in _food_layer.get_children():
 		if c.get_meta("natural", false) and not c.is_queued_for_deletion():
@@ -757,7 +766,8 @@ func _colony_stats() -> Dictionary:
 			open_chambers += 1
 	return {
 		"title": "%s colony  ·  %s soil" % [profile.species["name"], profile.soil["name"]],
-		"age": _duration_text(Time.get_unix_time_from_system() - _founded_at + 60.0),
+		"age": "%s  ·  %s, day %d of %d" % [_duration_text(Time.get_unix_time_from_system() - _founded_at + 60.0),
+				seasons.season_name(), seasons.day_of_season(), SeasonsScript.DAYS_PER_SEASON],
 		"workers": _worker_count(),
 		"alates": ("  ·  %d winged alates" % alates) if alates > 0 else "",
 		"roles": roles,
@@ -816,7 +826,7 @@ func _try_raise_alate() -> bool:
 ## After rain on a bright day (or now and then on any fine day), the alates leave
 ## together on their mating flight to found colonies of their own.
 func _maybe_nuptial_flight() -> void:
-	if _day_night.daylight < 0.55 or weather.raining:
+	if _day_night.daylight < 0.55 or weather.raining or colony.winter:
 		return
 	var alates: Array[Node] = []
 	for ant in _ants.get_children():
@@ -838,7 +848,8 @@ func _update_flights(delta: float) -> void:
 	_flight_clock -= delta
 	if _flight_clock <= 0.0:
 		_flight_clock = FLIGHT_CHECK
-		if _alate_count() >= MAX_ALATES - 2 and _spawn_rng.randf() < 0.35:
+		var chance := 0.7 if seasons.season() == SeasonsScript.SUMMER else 0.2  # flights peak in summer
+		if _alate_count() >= MAX_ALATES - 2 and _spawn_rng.randf() < chance:
 			_maybe_nuptial_flight()
 
 
@@ -887,7 +898,10 @@ func _hook_field_notes(founding: bool) -> void:
 		notes.note("Foragers found %s and began recruiting nestmates." % FOOD_NAMES.get(kind, "food"), "found_" + kind))
 	weather.rain_changed.connect(func(raining: bool):
 		if raining:
-			notes.note("Rain. Every forager hurried home and the colony stayed underground."))
+			if weather.snow:
+				notes.note("Snow is falling over the nest.")
+			else:
+				notes.note("Rain. Every forager hurried home and the colony stayed underground."))
 	bird.ant_taken.connect(func():
 		notes.note("A bird hopped down and carried off a forager."))
 	bird.scared_off.connect(func():
@@ -992,3 +1006,51 @@ func _on_ant_inspected(ant: Node2D) -> void:
 	notes.note(BEHAVIORS[key][1], "seen_" + key)
 	_announce("Behaviour observed: %s  (%d of %d)" % [BEHAVIORS[key][0], notes.count_prefix("seen_"),
 			BEHAVIORS.size()])
+
+
+# ---------------------------------------------------------------------------
+# Seasons
+# ---------------------------------------------------------------------------
+
+const SeasonsScript := preload("res://scripts/seasons.gd")
+const SEASON_NOTES := [
+	"Spring: the soil warms and the queen lays faster.",
+	"Summer: long warm days; mature colonies send out their alates.",
+	"Autumn: leaves fall and foragers gather what they can before the cold.",
+	"Winter: the colony withdraws deep into the nest. The queen rests and the brood waits for spring.",
+]
+
+var seasons: SeasonsScript
+
+
+func _build_seasons(saved: Dictionary) -> void:
+	seasons = SeasonsScript.new()
+	seasons.name = "Seasons"
+	add_child(seasons)
+	seasons.setup(_day_night, int(saved.get("day", 0)))
+	seasons.season_changed.connect(func(s: int):
+		_apply_season()
+		notes.note(SEASON_NOTES[s])
+		_announce(SeasonsScript.NAMES[s]))
+	_update_clear_spots()
+	_subterranean.entrance_opened.connect(func(_x: float): _update_clear_spots())
+	_apply_season()
+
+
+func _apply_season() -> void:
+	var s := seasons.season()
+	colony.winter = s == SeasonsScript.WINTER
+	colony.lay_rate = 1.4 if s == SeasonsScript.SPRING else 1.0
+	weather.snow = colony.winter
+	weather.autumn = s == SeasonsScript.AUTUMN
+	_day_night.season_tint = [Color(1.0, 1.0, 0.97), Color(1.03, 1.0, 0.92), Color(1.0, 0.9, 0.78),
+			Color(0.84, 0.9, 1.02)][s]
+
+
+## Snow never covers an open entrance (the ants keep them clear).
+func _update_clear_spots() -> void:
+	var xs: Array[float] = []
+	for i in _subterranean.entrances.size():
+		if _subterranean.is_dug(_subterranean.entrances[i]):
+			xs.append(_subterranean.entrance_xs[i])
+	weather.set_clear_spots(xs)

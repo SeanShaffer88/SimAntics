@@ -58,6 +58,8 @@ var population := 0  # current worker count, kept up to date by Main
 var surface_tint := Color.WHITE  # daylight colour, set by the day/night cycle
 var night := false  # fewer ants go out after dark
 var raining := false  # nobody goes out in the rain; food on the surface waits
+var winter := false  # the colony overwinters: no laying, brood waits, nobody goes out
+var lay_rate := 1.0  # seasonal: higher in spring
 var stats := {}  # job counters, handy for tuning: "<type>_given" / "<type>_done"
 
 var _tunnels: Tunnels
@@ -292,10 +294,10 @@ func _process(delta: float) -> void:
 	if _lay_timer <= 0.0:
 		# A full colony keeps raising brood at half pace; old foragers leaving keeps its size steady.
 		var slow := 2.0 if population >= max_workers else 1.0
-		_lay_timer = _rng.randf_range(LAY_INTERVAL.x, LAY_INTERVAL.y) * slow
+		_lay_timer = _rng.randf_range(LAY_INTERVAL.x, LAY_INTERVAL.y) * slow / lay_rate
 		# Laying tracks how well the brood is being fed: with a backlog of hungry
-		# larvae the nurses feed her less and she lays less.
-		if _count_in_zone("queen_eggs") < MAX_QUEEN_EGGS and brood.size() < MAX_BROOD \
+		# larvae the nurses feed her less and she lays less. In winter she rests.
+		if not winter and _count_in_zone("queen_eggs") < MAX_QUEEN_EGGS and brood.size() < MAX_BROOD \
 				and _hungry_larvae() < 16:
 			_add_brood(Stage.EGG, _tunnels.queen_chamber(), "queen_eggs", 0.0)
 			count("laid")
@@ -307,11 +309,12 @@ func _process(delta: float) -> void:
 		_feed_from_reserves()
 	_upkeep_clock -= delta
 	if _upkeep_clock <= 0.0:
-		_upkeep_clock = UPKEEP_INTERVAL
+		_upkeep_clock = UPKEEP_INTERVAL * (2.0 if winter else 1.0)  # cold ants need little food
 		_eat_from_stores()
 
 	for b in brood.duplicate():
-		b.age += delta
+		if not winter:  # in the cold, brood development pauses until spring
+			b.age += delta
 		if b.carried:
 			continue
 		match b.stage:
@@ -706,7 +709,7 @@ func add_cluster(cluster: Node2D) -> void:
 ## The most tempting food a surface ant at `x` can sense, or null. Stronger foods are
 ## noticed from further away and win over closer, plainer ones.
 func sense_food(x: float) -> Node2D:
-	if raining:
+	if raining or winter:
 		return null
 	var best: Node2D = null
 	var best_score := 0.0
@@ -733,7 +736,7 @@ func report_find(cluster: Node2D) -> void:
 
 ## A food that still needs hands, for an ant leaving the nest, or null.
 func take_recruit() -> Node2D:
-	if night or raining:
+	if night or raining or winter:
 		return null
 	var options: Array[Node2D] = []
 	for c in clusters:
