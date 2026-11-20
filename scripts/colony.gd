@@ -146,6 +146,7 @@ func food_position_in(chamber: int) -> Vector2:
 	return (store[_rng.randi() % store.size()] as Sprite2D).position
 
 
+var skirmish_x := NAN  # border where pavement ants are fighting a rival colony (NAN if none)
 var aphid_x := NAN  # where a garden-ant colony tends its aphids on the surface (NAN if none)
 
 

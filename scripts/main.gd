@@ -122,6 +122,8 @@ func _ready() -> void:
 	saved["day"] = int(saved.get("day", 0)) + _away_days
 	if profile.species["id"] == "garden":
 		_build_aphids()
+	elif profile.species["id"] == "pavement":
+		_build_skirmish()
 	_build_seasons(saved)
 	_hook_field_notes(founding)
 	if away != "":
@@ -158,6 +160,7 @@ func _process(delta: float) -> void:
 		_ambience.rain_level = 0.0 if weather.snow else weather.intensity  # snow falls silently
 	_update_flights(delta)
 	_update_natural_food(delta)
+	_update_skirmish(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -172,7 +175,11 @@ func _check_greetings() -> void:
 		for j in range(i + 1, ants.size()):
 			var b: Node2D = ants[j]
 			if a.global_position.distance_squared_to(b.global_position) < 81.0 and _spawn_rng.randf() < 0.5:
-				if a.greet(b.global_position):
+				if a.can_allogroom() and b.can_allogroom() and _spawn_rng.randf() < 0.3:
+					var dur := _spawn_rng.randf_range(3.0, 6.0)
+					a.allogroom(b.global_position, true, dur)
+					b.allogroom(a.global_position, false, dur)
+				elif a.greet(b.global_position):
 					b.greet(a.global_position)
 					if a.has_crop() != b.has_crop():
 						_share_food(a, b)
@@ -990,6 +997,9 @@ const BEHAVIORS := {
 	"midden": ["Building the midden", "A harvester carried seed husks up and out to the midden beside the mound."],
 	"milling": ["Milling seeds", "A big-headed major cracked seeds open with its huge jaws for its nestmates."],
 	"hitchhiking": ["Hitchhiker", "A tiny minima rode home on a leaf, guarding the carrier from parasitic flies."],
+	"grooming": ["Self-grooming", "An ant stopped to comb its antennae clean with its forelegs."],
+	"allogrooming": ["Allogrooming", "One ant licked a nestmate clean, sharing the colony's scent."],
+	"skirmish": ["Border war", "Pavement ants grappled with a rival colony to settle their territory."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
 	"trophallaxis": ["Trophallaxis", "You watched two ants share food mouth to mouth."],
@@ -1024,7 +1034,7 @@ func _on_ant_inspected(ant: Node2D) -> void:
 const SeasonsScript := preload("res://scripts/seasons.gd")
 ## Behaviours only one species shows; the others never count toward a colony's guide.
 const SPECIES_BEHAVIORS := {"midden": "harvester", "milling": "bigheaded",
-		"hitchhiking": "leafcutter", "aphids": "garden"}
+		"hitchhiking": "leafcutter", "aphids": "garden", "skirmish": "pavement"}
 
 
 func _guide_total() -> int:
@@ -1033,6 +1043,45 @@ func _guide_total() -> int:
 		if SPECIES_BEHAVIORS.get(key, profile.species["id"]) == profile.species["id"]:
 			total += 1
 	return total
+
+
+const SkirmishScript := preload("res://scripts/skirmish.gd")
+const SKIRMISH_INTERVAL := Vector2(300.0, 600.0)
+
+var skirmish: Node2D = null
+var _skirmish_clock := 0.0
+
+
+## Pavement ants hold their territory against neighbouring colonies in ritual border fights.
+func _build_skirmish() -> void:
+	skirmish = SkirmishScript.new()
+	skirmish.name = "Skirmish"
+	add_child(skirmish)
+	move_child(skirmish, _ants.get_index())
+	skirmish.setup(profile.species, GROUND_Y, VIEW_SIZE.x, profile.seed_value)
+	_skirmish_clock = _spawn_rng.randf_range(SKIRMISH_INTERVAL.x * 0.4, SKIRMISH_INTERVAL.y)
+
+
+func _update_skirmish(delta: float) -> void:
+	if skirmish == null:
+		return
+	skirmish.set_tint(colony.surface_tint)
+	colony.skirmish_x = skirmish.border_x if skirmish.is_holding() else NAN
+	if skirmish.active:
+		return
+	_skirmish_clock -= delta
+	if _skirmish_clock <= 0.0:
+		_skirmish_clock = _spawn_rng.randf_range(SKIRMISH_INTERVAL.x, SKIRMISH_INTERVAL.y)
+		if not colony.night and not colony.raining and not colony.winter and _worker_count() >= 12:
+			start_skirmish(_spawn_rng.randf() < 0.5)
+
+
+## Rival workers march in from one edge to fight at the border.
+func start_skirmish(from_left: bool) -> void:
+	skirmish.start(from_left)
+	_announce("Rival pavement ants at the border!")
+	notes.note("A neighbouring pavement-ant colony marched up to the border and the workers grappled there until the rivals withdrew.",
+			"first_skirmish")
 
 
 const AphidPlantScript := preload("res://scripts/aphid_plant.gd")

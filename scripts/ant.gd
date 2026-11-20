@@ -75,6 +75,13 @@ var _tend_x := INF  # x of the brood item an idle nurse is grooming (or the seed
 var _milling := false  # a big-headed major cracking seeds in a granary
 var _aphid_left := -1.0  # seconds left tending aphids on the surface (black garden ants)
 var _to_aphids := false
+var _groom_left := 0.0  # seconds of grooming left (self-grooming or grooming a nestmate)
+var _groom_mode := 0  # GROOM_SELF, GROOM_OTHER (the groomer) or GROOM_RECEIVE
+var _groom_x := 0.0  # where the nestmate being groomed (or grooming) stands
+var _fight_left := -1.0  # seconds left grappling a rival at the border (pavement ants)
+var _to_fight := false
+
+enum { GROOM_SELF, GROOM_OTHER, GROOM_RECEIVE }
 
 const CROP_TIME := 150.0
 
@@ -170,6 +177,10 @@ func behavior_key() -> String:
 		return "hitchhiking" if _carried.has_meta("hitchhiker") else "carry_food"
 	if _greet_left > 0.0:
 		return "trophallaxis" if has_crop() else "antennation"
+	if _groom_left > 0.0:
+		return "grooming" if _groom_mode == GROOM_SELF else "allogrooming"
+	if _fight_left > 0.0:
+		return "skirmish"
 	if _attending:
 		return "retinue"
 	if _dig_left > 0.0:
@@ -221,6 +232,10 @@ func describe() -> String:
 				parts.append("carrying food")
 	elif _greet_left > 0.0:
 		parts.append("sharing food" if has_crop() else "touching antennae")
+	elif _groom_left > 0.0:
+		parts.append(["cleaning its antennae", "grooming a nestmate", "being groomed"][_groom_mode])
+	elif _fight_left > 0.0:
+		parts.append("grappling a rival")
 	elif _attending:
 		parts.append("attending the queen")
 	elif _dig_left > 0.0:
@@ -251,6 +266,38 @@ func greet(other_pos: Vector2) -> bool:
 		_facing_left = dir.x < 0.0
 		_sprite.flip_h = _facing_left
 	return true
+
+
+## True when this ant is idling in a chamber and free to groom or be groomed.
+func can_allogroom() -> bool:
+	return state == State.IDLE_CHAMBER and _path.is_empty() and not _attending and _tend_x == INF 			and _greet_left <= 0.0 and _groom_left <= 0.0 and _carried == null and role != Role.ALATE 			and _tunnels.is_chamber(_current_node)
+
+
+## Allogrooming: one ant licks and combs a nestmate clean (spreading the colony odour and
+## removing fungal spores); the other stands still for it.
+func allogroom(other_pos: Vector2, groomer: bool, duration: float) -> void:
+	_groom_left = duration
+	_groom_mode = GROOM_OTHER if groomer else GROOM_RECEIVE
+	_groom_x = other_pos.x
+	_facing_left = other_pos.x < position.x
+	_sprite.flip_h = _facing_left
+
+
+func _update_grooming(delta: float) -> void:
+	_groom_left -= delta
+	match _groom_mode:
+		GROOM_SELF:  # forelegs drawn through the mouthparts: the body rocks and the front dips
+			_sprite.rotation = (0.12 if _facing_left else -0.12) + sin(age * 11.0) * 0.07
+			_sprite.scale.y = ColonyArt.SPRITE_SCALE * (0.9 if int(age * 8.0) % 2 == 0 else 1.0)
+		GROOM_OTHER:  # head working along the nestmate's body
+			_sprite.rotation = sin(age * 7.0) * 0.12
+			position.x += sin(age * 2.5) * 3.0 * delta
+		GROOM_RECEIVE:  # still, legs splayed, sometimes lifting a little
+			_sprite.rotation = sin(age * 1.5) * 0.04
+	if _groom_left <= 0.0:
+		_groom_left = 0.0
+		_sprite.rotation = 0.0
+		_sprite.scale.y = ColonyArt.SPRITE_SCALE
 
 
 ## A freshly emerged worker: pale, and it lingers by the brood for a while first.
@@ -340,6 +387,9 @@ func _process(delta: float) -> void:
 			_sprite.rotation += 0.06 if _frame % 2 == 0 else -0.06  # small head bob
 			_frame += 1
 		return
+	if _groom_left > 0.0:
+		_update_grooming(delta)
+		return
 	match state:
 		State.PATROL_TUNNEL:
 			if _follow_path(delta):
@@ -416,6 +466,10 @@ func _next_job() -> void:
 				_food_target = food
 				_travel_to(_tunnels.nearest_entrance(food.position.x))
 				return
+		if not is_nan(_colony.skirmish_x) and role in [Role.FORAGER, Role.WORKER] and _rng.randf() < 0.5:
+			_to_fight = true  # nestmates rush out to hold the border
+			_travel_to(_tunnels.nearest_entrance(_colony.skirmish_x))
+			return
 		var task := {}
 		match role:
 			Role.NURSE:
@@ -652,6 +706,11 @@ func _update_idle(delta: float) -> void:
 						_tunnels.chamber_floor_y(_current_node) - _half_height))
 				return
 		_milling = false
+		if _rng.randf() < 0.12 and role != Role.ALATE:
+			# ants groom themselves often: forelegs comb the antennae and are cleaned in turn
+			_groom_left = _rng.randf_range(2.0, 4.0)
+			_groom_mode = GROOM_SELF
+			return
 		if role == Role.NURSE and _colony != null and _rng.randf() < 0.75:
 			# idle nurses groom and lick the brood: go to one and work over it
 			var brood_at: Vector2 = _colony.brood_position_in(_current_node)
@@ -680,6 +739,10 @@ func _start_surface_trip() -> void:
 	if _food_target != null and is_instance_valid(_food_target):
 		_state_timer = 60.0  # straight to the food, then home
 		_path.append(Vector2(_food_target.position.x + _rng.randf_range(-6.0, 6.0), _ground_y - _half_height))
+	elif _colony != null and not is_nan(_colony.skirmish_x) and role in [Role.FORAGER, Role.WORKER] 			and (_to_fight or _rng.randf() < 0.6):
+		_to_fight = true
+		_state_timer = 20.0
+		_path.append(Vector2(_fight_spot(), _ground_y - _half_height))
 	elif _colony != null and not is_nan(_colony.aphid_x) and not _colony.winter 			and role in [Role.FORAGER, Role.WORKER] and _rng.randf() < 0.4:
 		# garden ants herd aphids on a nearby plant and milk them for honeydew
 		_to_aphids = true
@@ -695,11 +758,15 @@ func _update_surface(delta: float) -> void:
 		_harvest_left = -1.0
 		_to_aphids = false
 		_aphid_left = -1.0
+		_to_fight = false
+		_fight_left = -1.0
 		_path.clear()
 		_state_timer = 0.0
 	if not _follow_path(delta):
 		return
 	if _to_aphids and not _returning and _update_aphids(delta):
+		return
+	if _to_fight and not _returning and _update_fight(delta):
 		return
 	if not _returning and _food_target != null and _update_harvest(delta):
 		return
@@ -797,6 +864,39 @@ func _update_aphids(delta: float) -> bool:
 	_colony.count("honeydew")
 	_state_timer = 0.0
 	return false
+
+
+## A spot on this colony's side of the border where rival workers are pushing in.
+func _fight_spot() -> float:
+	var home_side := 1.0 if _colony.skirmish_x < 640.0 else -1.0
+	return _colony.skirmish_x + home_side * _rng.randf_range(-6.0, 20.0)
+
+
+## Pavement-ant border fight: grapple a rival for a few seconds, let go, find another,
+## until the rivals withdraw. Returns true while the ant is still at the border.
+func _update_fight(delta: float) -> bool:
+	if is_nan(_colony.skirmish_x):  # it's over: everyone goes home
+		_to_fight = false
+		_fight_left = -1.0
+		_sprite.rotation = 0.0
+		_state_timer = minf(_state_timer, 2.0)
+		return false
+	_state_timer = maxf(_state_timer, 5.0)
+	if _fight_left < 0.0:
+		if absf(position.x - _colony.skirmish_x) > 30.0:
+			_path.append(Vector2(_fight_spot(), _ground_y - _half_height))
+			return true
+		_fight_left = _rng.randf_range(4.0, 9.0)
+		_facing_left = _colony.skirmish_x < position.x
+		_sprite.flip_h = _facing_left
+	_fight_left -= delta
+	_sprite.rotation = sin(age * 13.0) * 0.22  # locked mandible to mandible, twisting
+	position.x += sin(age * 9.0) * 8.0 * delta
+	if _fight_left <= 0.0:
+		_fight_left = -1.0
+		_sprite.rotation = 0.0
+		_path.append(Vector2(_fight_spot(), _ground_y - _half_height))
+	return true
 
 
 ## Walks off the edge of the world and is removed (colony turnover once it is full).
