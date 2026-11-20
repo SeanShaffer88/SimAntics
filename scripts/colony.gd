@@ -146,6 +146,8 @@ func food_position_in(chamber: int) -> Vector2:
 	return (store[_rng.randi() % store.size()] as Sprite2D).position
 
 
+var soil_wetness := 0.0  # 0..1, from recent rain
+var water: Node2D = null  # rain drops on the surface (water_drops.gd), or null
 var skirmish_x := NAN  # border where pavement ants are fighting a rival colony (NAN if none)
 var aphid_x := NAN  # where a garden-ant colony tends its aphids on the surface (NAN if none)
 
@@ -851,7 +853,7 @@ func dig_task() -> Dictionary:
 	_dig_claims[pick.y] = int(_dig_claims.get(pick.y, 0)) + 1
 	var from := _tunnels.nodes[pick.x]
 	return {"type": "dig", "pickup_node": pick.x, "pickup_pos": from, "dig_into": pick.y,
-			"dig_time": _rng.randf_range(DIG_TIME.x, DIG_TIME.y),
+			"dig_time": _rng.randf_range(DIG_TIME.x, DIG_TIME.y) * (1.0 - 0.4 * soil_wetness),  # damp soil digs easier
 			"drop_node": _tunnels.nearest_entrance(from.x)}
 
 

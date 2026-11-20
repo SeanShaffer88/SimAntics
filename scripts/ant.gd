@@ -80,6 +80,8 @@ var _groom_mode := 0  # GROOM_SELF, GROOM_OTHER (the groomer) or GROOM_RECEIVE
 var _groom_x := 0.0  # where the nestmate being groomed (or grooming) stands
 var _fight_left := -1.0  # seconds left grappling a rival at the border (pavement ants)
 var _to_fight := false
+var _drink_target: Node2D = null  # a rain drop this forager is heading to drink from
+var _drink_left := -1.0
 
 enum { GROOM_SELF, GROOM_OTHER, GROOM_RECEIVE }
 
@@ -181,6 +183,8 @@ func behavior_key() -> String:
 		return "grooming" if _groom_mode == GROOM_SELF else "allogrooming"
 	if _fight_left > 0.0:
 		return "skirmish"
+	if _drink_left > 0.0:
+		return "drinking"
 	if _attending:
 		return "retinue"
 	if _dig_left > 0.0:
@@ -236,6 +240,8 @@ func describe() -> String:
 		parts.append(["cleaning its antennae", "grooming a nestmate", "being groomed"][_groom_mode])
 	elif _fight_left > 0.0:
 		parts.append("grappling a rival")
+	elif _drink_left > 0.0:
+		parts.append("drinking a raindrop")
 	elif _attending:
 		parts.append("attending the queen")
 	elif _dig_left > 0.0:
@@ -760,6 +766,8 @@ func _update_surface(delta: float) -> void:
 		_aphid_left = -1.0
 		_to_fight = false
 		_fight_left = -1.0
+		_drink_target = null
+		_drink_left = -1.0
 		_path.clear()
 		_state_timer = 0.0
 	if not _follow_path(delta):
@@ -767,6 +775,8 @@ func _update_surface(delta: float) -> void:
 	if _to_aphids and not _returning and _update_aphids(delta):
 		return
 	if _to_fight and not _returning and _update_fight(delta):
+		return
+	if _drink_target != null and not _returning and _update_drink(delta):
 		return
 	if not _returning and _food_target != null and _update_harvest(delta):
 		return
@@ -802,6 +812,12 @@ func _update_surface(delta: float) -> void:
 	_pause_timer -= delta
 	if _pause_timer <= 0.0:
 		_pause_timer = _rng.randf_range(0.3, 1.8)
+		if _colony != null and _colony.water != null and not has_crop() and _drink_target == null 				and _rng.randf() < 0.5:
+			var drop: Node2D = _colony.water.nearest(position.x, 220.0)
+			if drop != null:
+				_drink_target = drop  # thirsty: water beading on the grass after rain
+				_path.append(Vector2(drop.position.x + _rng.randf_range(-4.0, 4.0), _ground_y - _half_height))
+				return
 		var sensed: Node2D = _colony.sense_food(position.x) if _colony != null and role != Role.NURSE else null
 		if sensed != null:
 			_food_target = sensed  # caught the scent of something good
@@ -863,6 +879,32 @@ func _update_aphids(delta: float) -> bool:
 	fill_crop()
 	_colony.count("honeydew")
 	_state_timer = 0.0
+	return false
+
+
+## At a rain drop: drink for a few seconds, filling the crop to share at home.
+func _update_drink(delta: float) -> bool:
+	if not is_instance_valid(_drink_target):
+		_drink_target = null
+		_drink_left = -1.0
+		return false
+	if _drink_left < 0.0:
+		if absf(position.x - _drink_target.position.x) > 8.0:
+			_path.append(Vector2(_drink_target.position.x, _ground_y - _half_height))
+			return true
+		_drink_left = _rng.randf_range(2.0, 4.0)
+		_facing_left = _drink_target.position.x < position.x
+		_sprite.flip_h = _facing_left
+		_sprite.rotation = 0.15 if _facing_left else -0.15  # head down to the water
+	_drink_left -= delta
+	if _drink_left > 0.0:
+		return true
+	_drink_left = -1.0
+	_sprite.rotation = 0.0
+	_colony.water.sip(_drink_target)
+	_drink_target = null
+	fill_crop()
+	_colony.count("drank")
 	return false
 
 

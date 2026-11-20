@@ -26,6 +26,7 @@ func _initialize() -> void:
 		_check_roles(seed_value, gen)
 		if seed_value % 25 == 0:
 			_check_deterministic(seed_value, profile, gen)
+			_check_expansion(seed_value, profile, gen)
 	var ms := Time.get_ticks_msec() - started
 	if _failures.is_empty():
 		print("PASS  nest generator: %d seeds, %d ms" % [SEEDS, ms])
@@ -94,6 +95,24 @@ func _check_roles(seed_value: int, gen) -> void:
 		_fail(seed_value, "no nursery")
 	if gen.chambers.size() < 5:
 		_fail(seed_value, "only %d chambers" % gen.chambers.size())
+
+
+## Expanding a nest keeps it valid, and replaying the same expansions gives the same nest.
+func _check_expansion(seed_value: int, profile, gen) -> void:
+	var before: int = gen.chambers.size()
+	for i in 3:
+		gen.expand(seed_value, i)
+	if gen.chambers.size() <= before:
+		_fail(seed_value, "expansion added no chambers")
+	_check_reachable(seed_value, gen)
+	_check_no_overlap(seed_value, gen)
+	_check_in_bounds(seed_value, gen)
+	var again := NestGenerator.new()
+	again.generate(seed_value, profile.species, VIEW, GROUND_Y, SOIL_TOP)
+	for i in 3:
+		again.expand(seed_value, i)
+	if again.nodes != gen.nodes:
+		_fail(seed_value, "replaying expansions gave a different nest")
 
 
 func _check_deterministic(seed_value: int, profile, gen) -> void:

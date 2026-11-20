@@ -62,6 +62,64 @@ func generate(seed_value: int, species: Dictionary, view_size: Vector2, ground_y
 	_assign_roles()
 
 
+## Grows the finished nest a little further: 2-3 new side galleries with rooms, branching
+## off the existing ones. Deterministic for (colony seed, index), so a save only needs to
+## remember how many expansions happened. Returns the new chamber ids.
+func expand(seed_value: int, index: int) -> Array[int]:
+	_rng.seed = seed_value * 104729 + index * 7907 + 3
+	_rebuild_occupancy()
+	_max_depth = _soil_bottom - 10.0  # older nests reach deeper
+	var before := chambers.size()
+	var queue: Array[Dictionary] = []
+	var want := _rng.randi_range(2, 3)
+	for attempt in 40:
+		if chambers.size() - before >= want:
+			break
+		var from := _random_gallery_node()
+		if from == -1:
+			break
+		var side := -1.0 if _rng.randf() < 0.5 else 1.0
+		var down := _rng.randf() < 0.35
+		var dir := Vector2(_rng.randf_range(-0.4, 0.4), 1.0) if down else Vector2(side, _rng.randf_range(-0.1, 0.4))
+		_grow({"from": from, "dir": dir.normalized(), "kind": "trunk" if down else "side", "gen": 4,
+				"steps": _rng.randi_range(3, 8)}, queue)
+		queue.clear()  # no further sub-branches: expansions stay small
+	var added: Array[int] = []
+	for id: int in chambers:
+		if chambers[id]["role"] == "rest" and not _initial.has(id):
+			added.append(id)
+			_initial[id] = true
+	return added
+
+
+var _initial := {}  # chamber ids that existed before any expansion (plus those since handed out)
+
+
+func _rebuild_occupancy() -> void:
+	if not _occ.is_empty() and _occ_built:
+		return
+	_occ.clear()
+	for id in nodes.size():
+		_occupy(id)
+	for id: int in chambers:
+		var r: Vector2 = chambers[id]["radii"]
+		var c := nodes[id]
+		var x := c.x - r.x
+		while x <= c.x + r.x:
+			var y := c.y - r.y
+			while y <= c.y + r.y * FLOOR:
+				if not _occ.has(_cell(Vector2(x, y))):
+					_occ[_cell(Vector2(x, y))] = id
+				y += CELL * 0.5
+			x += CELL * 0.5
+	for id: int in chambers:
+		_initial[id] = true
+	_occ_built = true
+
+
+var _occ_built := false
+
+
 func is_chamber(id: int) -> bool:
 	return chambers.has(id)
 

@@ -320,6 +320,21 @@ static func food_piece(kind: String, variant: int) -> ImageTexture:
 			return _seed_shape(p, Vector2(4, 3), -0.3 + v * 0.45, 3.4, 1.9)), true, false))
 
 
+## A bead of rainwater on the grass: clear, with a bright highlight and a dark rim.
+static func water_bead(variant: int) -> ImageTexture:
+	return _cached("bead%d" % variant, func() -> Image:
+		var w := 6 + variant
+		return render(w, 5, func(p: Vector2) -> Color:
+			var e := (p - Vector2(w * 0.5, 3.0)) / Vector2(w * 0.5 - 0.3, 2.3)
+			if e.length() > 1.0 or p.y > 4.6:
+				return Color(0, 0, 0, 0)
+			if (e - Vector2(-0.35, -0.45)).length() < 0.3:
+				return Color(1, 1, 1, 0.95)
+			if e.length() > 0.75:
+				return Color(0.55, 0.7, 0.85, 0.75)
+			return Color(0.78, 0.9, 1.0, 0.45).lerp(Color(0.92, 0.97, 1.0, 0.6), clampf(e.y, 0.0, 1.0))))
+
+
 # ---------------------------------------------------------------------------
 # Buttons and panels
 # ---------------------------------------------------------------------------

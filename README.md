@@ -6,6 +6,8 @@ A passive, observational ant-farm simulation for Android, built in Godot 4.7.2 (
 
 - **Every player's colony is unique.** A seed created on first launch picks the species (Red Harvester, Big-headed, Leafcutter, Pavement or Black Garden Ant), the soil type and the nest blueprint.
 - **A root-like nest.** Winding galleries run down from two or three mound entrances; side branches end in small rounded chambers, and galleries that meet join into loops.
+- **A growing nest.** Once every planned room is dug, a colony of 15+ workers keeps extending its galleries and rooms (up to 8 times).
+- **Rain.** Showers darken the topsoil, which dries over time; damp soil is quicker to dig, and foragers drink the drops left on the grass.
 - **Founding and digging.** A new colony starts as a founding queen, her first brood and four workers in one small chamber. Workers dig the rest of the nest out over time:
   - Each soil pellet they carry out lands on a growing mound.
   - Chambers widen as they're dug.

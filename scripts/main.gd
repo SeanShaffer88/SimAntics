@@ -128,6 +128,7 @@ func _ready() -> void:
 		_build_aphids()
 	elif profile.species["id"] == "pavement":
 		_build_skirmish()
+	wetness = float(saved.get("wetness", 0.0))
 	_build_seasons(saved)
 	_hook_field_notes(founding)
 	if away != "":
@@ -178,6 +179,8 @@ func _process(delta: float) -> void:
 	_update_flights(delta)
 	_update_natural_food(delta)
 	_update_skirmish(delta)
+	_update_expansion(delta)
+	_update_wetness(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -272,7 +275,16 @@ func _build_ambiance() -> void:
 	weather.setup(GROUND_Y, VIEW_SIZE.x, profile.seed_value)
 	weather.rain_changed.connect(func(raining: bool):
 		if not raining:  # alates swarm on the bright, still day after rain
-			get_tree().create_timer(12.0).timeout.connect(_maybe_nuptial_flight))
+			get_tree().create_timer(12.0).timeout.connect(_maybe_nuptial_flight)
+			if not weather.snow:
+				water.scatter(_spawn_rng.randi_range(6, 10), _subterranean.entrance_xs))
+
+	water = WaterDropsScript.new()
+	water.name = "WaterDrops"
+	add_child(water)
+	move_child(water, _ants.get_index())
+	water.setup(GROUND_Y, VIEW_SIZE.x, profile.seed_value)
+	colony.water = water
 
 	bird = BirdScript.new()
 	bird.name = "Bird"
@@ -470,7 +482,8 @@ func save_colony() -> void:
 	SaveGame.write({"seed": profile.seed_value, "colony": colony.to_save(), "ants": ants,
 			"time_of_day": _day_night.time_of_day, "spawned": _spawned, "food_drops": _food_save(),
 			"dig": _subterranean.dig_save(), "spoil": _spoil.to_save(),
-			"founded_at": _founded_at, "history": _history, "notes": notes.to_save(), "day": seasons.day})
+			"founded_at": _founded_at, "history": _history, "notes": notes.to_save(), "day": seasons.day,
+			"wetness": wetness})
 
 
 func _restore_ants(saved: Dictionary) -> void:
@@ -1021,6 +1034,7 @@ const BEHAVIORS := {
 	"grooming": ["Self-grooming", "An ant stopped to comb its antennae clean with its forelegs."],
 	"allogrooming": ["Allogrooming", "One ant licked a nestmate clean, sharing the colony's scent."],
 	"skirmish": ["Border war", "Pavement ants grappled with a rival colony to settle their territory."],
+	"drinking": ["Drinking", "A forager drank from a raindrop on the grass and carried the water home."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
 	"trophallaxis": ["Trophallaxis", "You watched two ants share food mouth to mouth."],
@@ -1064,6 +1078,45 @@ func _guide_total() -> int:
 		if SPECIES_BEHAVIORS.get(key, profile.species["id"]) == profile.species["id"]:
 			total += 1
 	return total
+
+
+const WaterDropsScript := preload("res://scripts/water_drops.gd")
+var water: Node2D
+var wetness := 0.0  # 0..1: how damp the topsoil is after rain or melting snow
+
+
+func _update_wetness(delta: float) -> void:
+	if weather == null:
+		return
+	if weather.raining and not weather.snow:
+		wetness = minf(1.0, wetness + delta * weather.intensity / 90.0)
+	elif not weather.snow and weather.snow_depth > 0.0:
+		wetness = minf(1.0, wetness + delta / 200.0)  # snowmelt
+	else:
+		wetness = maxf(0.0, wetness - delta / (600.0 if colony.winter else 420.0))
+	colony.soil_wetness = wetness
+	_subterranean.set_wetness(wetness)
+	water.daylight = _day_night.daylight
+	if wetness > 0.6:
+		notes.note("Rain soaked into the topsoil. Damp soil is easier to dig, and the ants dig faster.", "wet_soil")
+
+
+const EXPAND_CHECK := 300.0  # seconds between checks for a crowded, fully dug nest
+const MAX_EXPANSIONS := 8
+var _expand_clock := EXPAND_CHECK
+
+
+## Real nests keep growing with the colony: once every planned room is dug, the
+## workers start new galleries off the old ones.
+func _update_expansion(delta: float) -> void:
+	_expand_clock -= delta
+	if _expand_clock > 0.0:
+		return
+	_expand_clock = EXPAND_CHECK
+	if colony.winter or colony.has_digging() or _subterranean.expansions >= MAX_EXPANSIONS 			or _worker_count() < 15:
+		return
+	if _subterranean.expand() > 0:
+		notes.note("The colony outgrew its nest and started digging new galleries.", "first_expansion")
 
 
 const SkirmishScript := preload("res://scripts/skirmish.gd")

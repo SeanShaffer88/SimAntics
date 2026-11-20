@@ -44,6 +44,8 @@ var _species: Dictionary
 var _seed := 0
 var _queen_home := -1
 var _wall_noise := FastNoiseLite.new()
+var _gen: RefCounted
+var expansions := 0  # times the colony has extended the nest past its first plan
 
 @onready var _soil: Sprite2D = $Soil
 @onready var _items: Node2D = $Items
@@ -61,6 +63,7 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	_wall_noise.seed = profile.seed_value
 	_wall_noise.frequency = 0.3
 	var gen := NestGenerator.new()
+	_gen = gen
 	gen.generate(profile.seed_value, profile.species, view_size, ground_y, soil_top)
 	nodes = gen.nodes
 	links = gen.links
@@ -69,6 +72,9 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	entrance_x = gen.entrance_x
 	entrances = gen.entrances
 	entrance_xs = gen.entrance_xs
+	for i in int(dig_state.get("expansions", 0)):  # replay the colony's later digging
+		_apply_expansion(gen.expand(profile.seed_value, i))
+	expansions = int(dig_state.get("expansions", 0))
 	founding_chamber = _pick_founding_chamber()
 	dug.resize(nodes.size())
 	dug.fill(0)
@@ -101,6 +107,7 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	_soil.texture = ImageTexture.create_from_image(_img)
 	_soil.position = Vector2(0.0, soil_top)
 	_soil.scale = Vector2(px, px)
+	_build_damp_overlay(view_size)
 	_queen_home = _choose_queen_home()
 	_place_queen(profile.species)
 	_furnish_chambers(mature)
@@ -291,7 +298,59 @@ func dig_save() -> Dictionary:
 	var work := {}
 	for id: int in dig_work:
 		work[str(id)] = dig_work[id]
-	return {"dug": open, "work": work, "nest": NestGenerator.VERSION}
+	return {"dug": open, "work": work, "nest": NestGenerator.VERSION, "expansions": expansions}
+
+
+var _damp: Sprite2D
+
+
+## Rain soaking into the topsoil darkens it from the surface down.
+func _build_damp_overlay(view_size: Vector2) -> void:
+	var grad := Gradient.new()
+	grad.set_color(0, Color(0.08, 0.05, 0.03, 0.42))
+	grad.set_color(1, Color(0.08, 0.05, 0.03, 0.0))
+	grad.add_point(0.55, Color(0.08, 0.05, 0.03, 0.18))
+	var tex := GradientTexture2D.new()
+	tex.gradient = grad
+	tex.fill_from = Vector2(0.5, 0.0)
+	tex.fill_to = Vector2(0.5, 1.0)
+	tex.width = 4
+	tex.height = 128
+	_damp = Sprite2D.new()
+	_damp.name = "Damp"
+	_damp.texture = tex
+	_damp.centered = false
+	_damp.position = Vector2(0.0, _soil_top)
+	_damp.scale = Vector2(view_size.x / 4.0, 1.0)
+	_damp.modulate.a = 0.0
+	add_child(_damp)
+	move_child(_damp, _soil.get_index() + 1)
+
+
+## 0 (dry) .. 1 (soaked): how far down and how dark the damp shows.
+func set_wetness(value: float) -> void:
+	if _damp == null:
+		return
+	_damp.modulate.a = value
+	_damp.scale.y = (60.0 + value * 140.0) / 128.0
+
+
+## The colony outgrows its nest: plan a few new galleries and rooms off the existing
+## ones (left undug for the workers to excavate). Returns how many rooms were planned.
+func expand() -> int:
+	var added: Array[int] = _gen.expand(_seed, expansions)
+	expansions += 1
+	_apply_expansion(added)
+	dug.resize(nodes.size())  # new nodes start undug (resize fills with 0)
+	return added.size()
+
+
+func _apply_expansion(added: Array[int]) -> void:
+	for i in added.size():
+		var role := "rest"
+		if i == 0:  # the first new room of each expansion holds stores
+			role = "fungus" if _species["food"] == "fungus" else "food"
+		chambers[added[i]]["role"] = role
 
 
 ## The founding chamber: the room closest to the main entrance, where the queen
