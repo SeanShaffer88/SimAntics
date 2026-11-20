@@ -138,7 +138,7 @@ func _queen_fed() -> bool:
 func ant_died(at: Vector2, chamber: int, texture: Texture2D) -> void:
 	count("died")
 	var floor_y := _tunnels.chamber_floor_y(chamber) if _tunnels.is_chamber(chamber) else at.y + 4.0
-	var body := _tunnels.add_item(texture, Vector2(at.x, floor_y), "corpse", 1)
+	var body := _tunnels.add_item(texture, Vector2(at.x, floor_y), "corpse", ColonyArt.SPRITE_SCALE)
 	body.flip_v = true  # on its back, legs curled
 	body.modulate = Color(0.55, 0.5, 0.48)
 	_corpses.append({"sprite": body, "chamber": chamber, "ready": _clock + _rng.randf_range(20.0, 45.0)})
@@ -724,6 +724,37 @@ func forage_task() -> Dictionary:
 	return {"type": "store", "item": item, "drop_node": target, "zone": "food"}
 
 
+## A piece of a grub, wireworm or pupa the diggers uncovered, to carry to the stores.
+func prey_task() -> Dictionary:
+	if _tunnels.life == null:
+		return {}
+	var meal: Dictionary = _tunnels.life.next_meal()
+	if meal.is_empty():
+		return {}
+	var targets := _tunnels.chambers_with_role("fungus" if _species["food"] == "fungus" else "food")
+	if targets.is_empty():
+		targets = _tunnels.chambers_with_role("nursery")
+	var p: Vector2 = meal["pos"]
+	var best := -1
+	var best_d := INF
+	for id in _tunnels.nodes.size():
+		if _tunnels.is_dug(id) and not _tunnels.is_entrance(id) and not _tunnels.is_chamber(id):
+			var d := _tunnels.nodes[id].distance_to(p)
+			if d < best_d:
+				best_d = d
+				best = id
+	if best == -1 or best_d > 40.0 or targets.is_empty():
+		return {}
+	var at := _tunnels.nodes[best]  # the piece is cut free into the gallery itself
+	_tunnels.life.take_piece(int(meal["index"]))
+	var item := _tunnels.add_item(ColonyArt.prey_bit(2), at + Vector2(0, 3), "food")
+	item.set_meta("nutrient", "protein")
+	item.set_meta("critter", true)
+	count("prey_pieces")
+	return {"type": "store", "item": item, "pickup_node": best, "pickup_pos": at, "critter": true,
+			"drop_node": targets[_rng.randi() % targets.size()], "zone": "food"}
+
+
 ## Honeydew from the aphids, brought home to the stores (sugars for the workers).
 func honeydew_task() -> Dictionary:
 	var targets := _tunnels.chambers_with_role("food")
@@ -870,6 +901,10 @@ func release(task: Dictionary) -> void:
 		var b: Brood = task["brood"]
 		b.reserved = false
 		b.carried = false
+	if task.get("critter", false):  # an abandoned piece of prey is left for the next ant
+		var piece: Sprite2D = task["item"]
+		if is_instance_valid(piece) and piece.get_parent() != null and piece.get_parent().name == "Items":
+			piece.queue_free()
 	if task.get("type") == "feed" and task.has("food") and _tunnels.food_items.has(task["pickup_node"]):
 		(_tunnels.food_items[task["pickup_node"]] as Array).append(task["food"])
 

@@ -195,12 +195,6 @@ static func paint_tunnels(img: Image, base: Image, mask: PackedByteArray, dist: 
 			var d := dist[i]
 			if d <= AO_RADIUS:
 				soil = soil.darkened(0.42 * pow(1.0 - d / (AO_RADIUS + 1.0), 1.6))
-			if d <= 1.0:
-				soil = base.get_pixel(x, y).lightened(0.12)  # walls lined with packed, smoothed soil
-			if y > 0 and mask[i - w] == 1:
-				soil = base.get_pixel(x, y).lightened(0.18)  # packed, trodden floor
-			elif y > 1 and mask[i - 2 * w] == 1:
-				soil = soil.lightened(0.05)
-			elif y < h - 1 and mask[i + w] == 1:
-				soil = soil.darkened(0.15)  # overhanging ceiling lip
+			# (the packed lining along walls and floors is drawn by shaders/soil.gdshader,
+			# along the smooth wall rather than the art grid)
 			img.set_pixel(x, y, soil)

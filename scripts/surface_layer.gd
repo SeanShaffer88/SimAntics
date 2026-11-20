@@ -27,17 +27,28 @@ func setup(view_size: Vector2, ground_y: float, soil_top: float, entrance_xs: Ar
 	for x in entrance_xs.slice(1):
 		extra_cols.append(int(x / px))
 	_textures.clear()
-	for i in PixelArt.surface_preset_count():
-		var rng := RandomNumberGenerator.new()
-		rng.seed = seed_value + i * 101
-		var img := SurfaceArt.make_surface_image(int(view_size.x / px), int(soil_top / px), int(ground_y / px),
-				int(entrance_xs[0] / px), rng, i, extra_cols)
-		_textures.append(ImageTexture.create_from_image(img))
+	_textures.resize(PixelArt.surface_preset_count())  # each scene is drawn the first time it is shown
+	_build_args = [view_size, soil_top, entrance_xs, extra_cols, seed_value]
 	for sprite: Sprite2D in [_backdrop, _incoming]:
 		sprite.position = Vector2.ZERO
-		sprite.scale = Vector2(px, px)
+		sprite.scale = Vector2(px, px) / SurfaceArt.SS  # the image is at full screen resolution
 	_incoming.modulate.a = 0.0
 	show_preset(start_preset, false)
+
+
+var _build_args := []
+
+
+func _texture_for(i: int) -> ImageTexture:
+	if _textures[i] == null:
+		var px := SurfaceArt.PIXEL_SCALE
+		var view_size: Vector2 = _build_args[0]
+		var rng := RandomNumberGenerator.new()
+		rng.seed = int(_build_args[4]) + i * 101
+		var img := SurfaceArt.make_surface_image(int(view_size.x / px), int(float(_build_args[1]) / px),
+				int(_ground_y / px), int((_build_args[2] as Array)[0] / px), rng, i, _build_args[3])
+		_textures[i] = ImageTexture.create_from_image(img)
+	return _textures[i]
 
 
 func preset_names() -> PackedStringArray:
@@ -55,9 +66,9 @@ func show_preset(index: int, fade: bool = true) -> void:
 	_interrupt_fade()
 	current_preset = index
 	if not fade:
-		_backdrop.texture = _textures[index]
+		_backdrop.texture = _texture_for(index)
 		return
-	_incoming.texture = _textures[index]
+	_incoming.texture = _texture_for(index)
 	_incoming.modulate.a = 0.0
 	_tween = create_tween()
 	_tween.tween_property(_incoming, "modulate:a", 1.0, FADE_TIME) \

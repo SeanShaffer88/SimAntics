@@ -44,6 +44,8 @@ var _species: Dictionary
 var _seed := 0
 var _queen_home := -1
 var _wall_noise := FastNoiseLite.new()
+const BuriedLife := preload("res://scripts/buried_life.gd")
+var life: Node2D  # creatures in the soil (buried_life.gd)
 var _gen: RefCounted
 var expansions := 0  # times the colony has extended the nest past its first plan
 
@@ -72,6 +74,11 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	entrance_x = gen.entrance_x
 	entrances = gen.entrances
 	entrance_xs = gen.entrance_xs
+	# creatures in the soil, placed from the original blueprint (before any expansion)
+	life = BuriedLife.new()
+	life.name = "BuriedLife"
+	life.generate(profile.seed_value, nodes.duplicate(), soil_top, view_size.y - NestGenerator.BOTTOM_MARGIN, view_size.x)
+	life.restore(dig_state.get("life", []))
 	for i in int(dig_state.get("expansions", 0)):  # replay the colony's later digging
 		_apply_expansion(gen.expand(profile.seed_value, i))
 	expansions = int(dig_state.get("expansions", 0))
@@ -107,7 +114,20 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	_soil.texture = ImageTexture.create_from_image(_img)
 	_soil.position = Vector2(0.0, soil_top)
 	_soil.scale = Vector2(px, px)
+	_setup_soil_shader()
+	add_child(life)
+	move_child(life, _soil.get_index() + 1)
+	life.build(func(p: Vector2) -> bool:
+		# already dug into (or right beside): found long ago
+		for k in 9:
+			var q := p if k == 8 else p + Vector2.from_angle(k * PI / 4.0) * 16.0
+			if not is_solid(q):
+				return true
+		return false)
 	_build_damp_overlay(view_size)
+	# brood, food and the queen are drawn at high resolution and filtered down
+	_items.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	_queen.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	_queen_home = _choose_queen_home()
 	_place_queen(profile.species)
 	_furnish_chambers(mature)
@@ -264,6 +284,8 @@ func dig(id: int, from_id: int) -> bool:
 			_on_chamber_opened(id)
 		elif entrances.has(id):
 			entrance_opened.emit(nodes[id].x)  # broke through to the surface
+	if life != null:
+		life.dug_at(nodes[id])
 	return opened
 
 
@@ -280,6 +302,38 @@ func _repaint(changed: Rect2i) -> void:
 	SoilArt.update_distance(_dist, _mask, _art_size.x, _art_size.y, dist_rect)
 	SoilArt.paint_tunnels(_img, _base, _mask, _dist, paint_rect, _air)
 	(_soil.texture as ImageTexture).update(_img)
+	_update_mask_texture(paint_rect)
+
+
+const SoilShader := preload("res://shaders/soil.gdshader")
+var _mask_img: Image
+var _mask_tex: ImageTexture
+
+
+## The soil is drawn by a shader that gives tunnels smooth, anti-aliased walls (see
+## shaders/soil.gdshader); it needs the open-air mask as a texture.
+func _setup_soil_shader() -> void:
+	var bytes := PackedByteArray()
+	bytes.resize(_mask.size())
+	for i in _mask.size():
+		bytes[i] = 255 if _mask[i] == 1 else 0
+	_mask_img = Image.create_from_data(_art_size.x, _art_size.y, false, Image.FORMAT_R8, bytes)
+	_mask_tex = ImageTexture.create_from_image(_mask_img)
+	var mat := ShaderMaterial.new()
+	mat.shader = SoilShader
+	mat.set_shader_parameter("mask_tex", _mask_tex)
+	mat.set_shader_parameter("art_size", Vector2(_art_size))
+	_soil.material = mat
+	_soil.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+
+
+func _update_mask_texture(rect: Rect2i) -> void:
+	if _mask_img == null:
+		return
+	for y in range(rect.position.y, rect.end.y):
+		for x in range(rect.position.x, rect.end.x):
+			_mask_img.set_pixel(x, y, Color(float(_mask[y * _art_size.x + x]), 0.0, 0.0))
+	_mask_tex.update(_mask_img)
 
 
 func _on_chamber_opened(id: int) -> void:
@@ -298,7 +352,8 @@ func dig_save() -> Dictionary:
 	var work := {}
 	for id: int in dig_work:
 		work[str(id)] = dig_work[id]
-	return {"dug": open, "work": work, "nest": NestGenerator.VERSION, "expansions": expansions}
+	return {"dug": open, "work": work, "nest": NestGenerator.VERSION, "expansions": expansions,
+			"life": life.to_save() if life != null else []}
 
 
 var _damp: Sprite2D
@@ -495,16 +550,14 @@ func _furnish(id: int, stocked: bool) -> void:
 			if stocked:
 				_scatter(left, right, floor_y, 8, func(): return ColonyArt.waste_bit(waste_food, _rng.randi_range(0, 1)))
 		"fungus":
-			var w := int(span / SoilArt.PIXEL_SCALE * 0.85)
-			var h := int(ceiling / SoilArt.PIXEL_SCALE * 1.5)
-			add_item(ColonyArt.fungus_garden(w, h, _seed + id), Vector2(mid, floor_y),
-					"fungus", SoilArt.PIXEL_SCALE)
+			var w := int(span * 0.85)
+			var h := int(ceiling * 1.5)
+			add_item(ColonyArt.fungus_garden(w, h, _seed + id), Vector2(mid, floor_y), "fungus")
 		"refuse":
-			var w := int(span / SoilArt.PIXEL_SCALE * 0.6)
-			var h := int(ceiling / SoilArt.PIXEL_SCALE * 1.2)
+			var w := int(span * 0.6)
+			var h := int(ceiling * 1.2)
 			if stocked:
-				add_item(ColonyArt.refuse_heap(w, h, _seed + id), Vector2(mid, floor_y),
-						"refuse", SoilArt.PIXEL_SCALE)
+				add_item(ColonyArt.refuse_heap(w, h, _seed + id), Vector2(mid, floor_y), "refuse")
 				_scatter(left, right, floor_y, 12, func(): return ColonyArt.prey_bit(_rng.randi_range(0, 4)))
 
 
@@ -589,7 +642,7 @@ func _scatter(left: float, right: float, floor_y: float, count: int, make: Calla
 
 
 ## Adds an item sprite whose bottom-centre sits at `bottom_center`.
-func add_item(tex: Texture2D, bottom_center: Vector2, kind: String, item_scale: int = ColonyArt.ITEM_SCALE) -> Sprite2D:
+func add_item(tex: Texture2D, bottom_center: Vector2, kind: String, item_scale: float = ColonyArt.ITEM_SCALE) -> Sprite2D:
 	var sprite := Sprite2D.new()
 	sprite.texture = tex
 	sprite.scale = Vector2.ONE * item_scale

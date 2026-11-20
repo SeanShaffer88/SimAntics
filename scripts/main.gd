@@ -72,6 +72,7 @@ var _observer: ObserverScript
 
 func _ready() -> void:
 	profile = ColonyProfile.load_or_create()
+	_ants.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS  # hi-res ants, filtered down
 	var saved := {} if profile.is_preview else SaveGame.read(profile.seed_value)
 	if saved.has("dig") and int(saved["dig"].get("nest", 1)) != NestGenerator.VERSION:
 		saved = _relay_nest(saved)
@@ -225,11 +226,13 @@ func _share_food(a: Node2D, b: Node2D) -> void:
 	receiver.fill_crop()
 	var drop := Sprite2D.new()
 	drop.texture = ColonyArt.food_crumb("nectar", 0)
+	drop.scale = Vector2.ONE * ColonyArt.ITEM_SCALE
+	drop.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	drop.position = ((a.global_position + b.global_position) * 0.5).round() + Vector2(0.0, -1.0)
 	drop.z_index = 2
 	add_child(drop)
 	var fade := drop.create_tween()
-	fade.tween_property(drop, "scale", Vector2.ONE * 0.4, 0.9)
+	fade.tween_property(drop, "scale", Vector2.ONE * ColonyArt.ITEM_SCALE * 0.4, 0.9)
 	fade.parallel().tween_property(drop, "modulate:a", 0.0, 0.9)
 	fade.tween_callback(drop.queue_free)
 
@@ -973,6 +976,7 @@ func _hook_field_notes(founding: bool) -> void:
 	if founding:
 		notes.note("A mated queen sealed herself into a small chamber below the surface, with her first brood and a few workers.", "founded")
 	colony.note.connect(func(text: String, key: String): notes.note(text, key))
+	_subterranean.life.exposed.connect(_on_creature_exposed)
 	colony.worker_emerged.connect(func(_pos: Vector2, _chamber: int):
 		notes.note("The first new worker emerged, pale and soft.", "first_worker"))
 	_subterranean.chamber_opened.connect(func(id: int):
@@ -1084,6 +1088,7 @@ const BEHAVIORS := {
 	"plugging": ["Sealing up", "Guards heaped soil into the entrance to close the nest for the night."],
 	"spore_grooming": ["Social immunity", "Nestmates groomed fungal spores off a forager before they could infect it."],
 	"self_removal": ["Leaving to die", "An infected worker walked out of the nest to die alone, protecting the colony."],
+	"underground_prey": ["Underground prey", "A worker carried home a piece of a grub the diggers uncovered."],
 	"drinking": ["Drinking", "A forager drank from a raindrop on the grass and carried the water home."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],
@@ -1141,13 +1146,16 @@ func _on_corpse_dumped(x: float, texture: Texture2D) -> void:
 	if _remains == null:
 		_remains = Node2D.new()
 		_remains.name = "Remains"
+		_remains.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 		add_child(_remains)
 		move_child(_remains, _ants.get_index())
 	var body := Sprite2D.new()
 	body.texture = texture
 	body.flip_v = true
 	body.modulate = Color(0.5, 0.46, 0.44)
-	body.position = Vector2(roundf(x + _spawn_rng.randf_range(-6.0, 6.0)), GROUND_Y - texture.get_height() * 0.5 + 1.0)
+	body.scale = Vector2.ONE * ColonyArt.SPRITE_SCALE
+	body.position = Vector2(roundf(x + _spawn_rng.randf_range(-6.0, 6.0)),
+			GROUND_Y - texture.get_height() * ColonyArt.SPRITE_SCALE * 0.5 + 1.0)
 	_remains.add_child(body)
 	if _remains.get_child_count() > 8:
 		_remains.get_child(0).queue_free()  # older remains break down
@@ -1213,6 +1221,19 @@ func _update_climate(delta: float) -> void:
 			notes.note("Too cold to forage: at %d deg C the ants were too sluggish to go out." % roundi(t), "too_cold")
 	elif not colony.forage_ok and t >= float(window[0]) + 1.0 and t <= float(window[1]) - 1.0:
 		colony.forage_ok = true
+
+
+const CREATURE_NOTES := {
+	"grub": "The diggers broke into a scarab beetle grub curled in the soil. Workers swarmed it and carried it home in pieces.",
+	"wireworm": "Digging uncovered a wireworm, the larva of a click beetle. The workers cut it up for the stores.",
+	"pupa": "A moth pupa was buried where the ants were digging. It could not escape, and became food.",
+	"beetle": "The ants dug into a ground beetle resting in the soil. It shouldered its way off, deeper into the earth.",
+	"worm": "An earthworm's burrow was opened. The worm pulled itself away through the soil.",
+}
+
+
+func _on_creature_exposed(kind: String, _at: Vector2) -> void:
+	notes.note(CREATURE_NOTES.get(kind, "The diggers found something living in the soil."), "creature_" + kind)
 
 
 const SpiderScript := preload("res://scripts/spider.gd")

@@ -28,7 +28,8 @@ func _process(_delta: float) -> bool:
 	if _frames % 20 == 0:
 		for ant in _main.get_node("Ants").get_children():
 			if ant.position.y > 140.0 and nest.is_solid(ant.position) and nest.is_solid(ant.position + Vector2(0, -3)):
-				var key := "ant in soil at node %d (chamber %s)" % [ant._current_node, nest.is_chamber(ant._current_node)]
+				var key := "ant in soil at node %d (chamber %s, state %d, job %s, wall %s)" % [ant._current_node,
+						nest.is_chamber(ant._current_node), ant.state, ant._task.get("type", "-"), ant._on_wall]
 				_bad[key] = int(_bad.get(key, 0)) + 1
 		for b in _main.colony.brood:
 			if nest.is_solid(b.sprite.position + Vector2(0, -2)):

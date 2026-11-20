@@ -30,6 +30,7 @@ func setup(species: Dictionary, ground_y: float, width: float, seed_value: int) 
 	_ground_y = ground_y
 	_width = width
 	_rng.seed = seed_value + 777
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 
 
 ## Rivals arrive from one side of the farm and hold the border for a while.
@@ -42,10 +43,11 @@ func start(from_left: bool) -> void:
 	border_x = _rng.randf_range(120.0, 220.0)
 	if not from_left:
 		border_x = _width - border_x
-	var half_h := _frames[0].get_height() * 0.5
+	var half_h := _frames[0].get_height() * ColonyArt.SPRITE_SCALE * 0.5
 	for i in _rng.randi_range(7, 11):
 		var s := Sprite2D.new()
 		s.texture = _frames[0]
+		s.scale = Vector2.ONE * ColonyArt.SPRITE_SCALE
 		var start_x := (-20.0 - i * 9.0) if from_left else (_width + 20.0 + i * 9.0)
 		s.position = Vector2(start_x, _ground_y - half_h)
 		add_child(s)

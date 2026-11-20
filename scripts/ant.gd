@@ -200,6 +200,8 @@ func behavior_key() -> String:
 				return "necrophoresis"
 		if _carried.has_meta("cannibal"):
 			return "cannibalism"
+		if _carried.has_meta("critter"):
+			return "underground_prey"
 		return "hitchhiking" if _carried.has_meta("hitchhiker") else "carry_food"
 	if _sick:
 		return "self_removal"
@@ -587,6 +589,8 @@ func _next_job() -> void:
 					task = _colony.dig_task()  # extend the nest
 				elif role == Role.WORKER and _rng.randf() < 0.55:
 					task = _colony.waste_task()
+		if task.is_empty() and role in [Role.WORKER, Role.FORAGER, Role.GUARD] and _rng.randf() < 0.6:
+			task = _colony.prey_task()  # cut up a grub or pupa the diggers broke into
 		if not task.is_empty():
 			_start_task(task)
 			return
@@ -759,7 +763,13 @@ func _walk_point(id: int) -> Vector2:
 		n = n if n.y > 0.0 else -n  # +1 lane: the floor of a sloping or level gallery
 	else:
 		n = n if n.x > 0.0 else -n  # in a shaft: the right-hand wall
-	return p + n * _lane * clampf(6.0 - _half_height, 1.0, 4.0)
+	# keep inside the gallery: where its wall wobbles in, walk nearer the middle
+	var reach := clampf(6.0 - _half_height, 1.0, 4.0)
+	for shrink: float in [1.0, 0.5, 0.0]:
+		var q := p + n * _lane * reach * shrink
+		if not _tunnels.is_solid(q) and not _tunnels.is_solid(q + n * signf(_lane) * 2.0):
+			return q
+	return p
 
 
 func _arrive() -> void:

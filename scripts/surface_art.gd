@@ -5,7 +5,8 @@ extends RefCounted
 
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
 
-const PIXEL_SCALE := 2
+const PIXEL_SCALE := 2  # layout units: 1 art pixel = 2 screen pixels
+const SS := 2  # the image itself is drawn at SS x the layout resolution (full screen resolution)
 const D := 2  # detail factor: sizes below are written in the old 4x4 units and scaled by D
 const LIGHT := Vector2(-0.55, -0.83)
 const ENTRANCE_CLEARANCE := 14 * D
@@ -15,7 +16,7 @@ const HOLE := Color("#2a1b12")
 static func make_surface_image(width: int, height: int, ground_row: int, entrance_col: int,
 		rng: RandomNumberGenerator, preset: int, extra_cols: Array = []) -> Image:
 	var p: Dictionary = PixelArt.SURFACE_PRESETS[preset]
-	var img := Image.create_empty(width, height, false, Image.FORMAT_RGBA8)
+	var img := Image.create_empty(width * SS, height * SS, false, Image.FORMAT_RGBA8)
 	_sky(img, ground_row, p["sky"])
 	if preset == PixelArt.URBAN:
 		_buildings(img, width, ground_row, rng, p["sky"])
@@ -65,15 +66,16 @@ static func make_surface_image(width: int, height: int, ground_row: int, entranc
 # Helpers
 # ---------------------------------------------------------------------------
 
+## Paints one layout pixel (an SS x SS block of the full-resolution image).
 static func _px(img: Image, x: int, y: int, c: Color) -> void:
-	if x >= 0 and y >= 0 and x < img.get_width() and y < img.get_height():
-		img.set_pixel(x, y, c)
+	if x >= 0 and y >= 0 and x * SS < img.get_width() and y * SS < img.get_height():
+		img.fill_rect(Rect2i(x * SS, y * SS, SS, SS), c)
 
 
 ## Blends `c` over what is already there (for soft edges and haze).
 static func _blend(img: Image, x: int, y: int, c: Color, amount: float) -> void:
-	if x >= 0 and y >= 0 and x < img.get_width() and y < img.get_height():
-		img.set_pixel(x, y, img.get_pixel(x, y).lerp(c, clampf(amount, 0.0, 1.0)))
+	if x >= 0 and y >= 0 and x * SS < img.get_width() and y * SS < img.get_height():
+		_px(img, x, y, img.get_pixel(x * SS, y * SS).lerp(c, clampf(amount, 0.0, 1.0)))
 
 
 static func _near_entrance(x: int, entrance_col: int, margin: int = ENTRANCE_CLEARANCE) -> bool:
@@ -87,23 +89,29 @@ static func _sky_at(bands: Array, t: float) -> Color:
 
 
 ## Shaded fill of an ellipse lit from the upper left; returns nothing, paints in place.
+## Drawn at full resolution, so canopies, clouds and bushes have smooth edges and
+## leaf-sized texture; tones blend smoothly rather than in bands.
 static func _shaded_ellipse(img: Image, c: Vector2, r: Vector2, tones: Array, density: float = 1.0,
 		rng: RandomNumberGenerator = null) -> void:
-	for y in range(floori(c.y - r.y), ceili(c.y + r.y) + 1):
-		for x in range(floori(c.x - r.x), ceili(c.x + r.x) + 1):
-			var n := Vector2((x + 0.5 - c.x) / r.x, (y + 0.5 - c.y) / r.y)
+	var w := img.get_width()
+	var h := img.get_height()
+	for yy in range(maxi(0, floori((c.y - r.y) * SS)), mini(h, ceili((c.y + r.y) * SS) + 1)):
+		for xx in range(maxi(0, floori((c.x - r.x) * SS)), mini(w, ceili((c.x + r.x) * SS) + 1)):
+			var n := Vector2(((xx + 0.5) / SS - c.x) / r.x, ((yy + 0.5) / SS - c.y) / r.y)
 			var d := n.length()
-			if d > 1.0:
+			var cover := clampf((1.0 - d) * minf(r.x, r.y) * SS + 0.5, 0.0, 1.0)
+			if cover <= 0.0:
 				continue
 			if rng != null and rng.randf() > density:
 				continue
 			var lambert := -n.dot(LIGHT) * 0.55 + 0.5
 			if rng != null:
 				lambert += rng.randf_range(-0.22, 0.22)  # individual leaves catch the light
-			lambert = clampf(lambert, 0.0, 0.999)
-			if d > 0.88:
-				lambert *= 0.6  # rim falls into shadow
-			_px(img, x, y, tones[int(lambert * tones.size())])
+			lambert = clampf(lambert, 0.0, 0.999) * (1.0 - 0.4 * smoothstep(0.82, 1.0, d))  # rim in shadow
+			var f := lambert * (tones.size() - 1)
+			var i := int(f)
+			var col: Color = (tones[i] as Color).lerp(tones[mini(i + 1, tones.size() - 1)], f - i)
+			img.set_pixel(xx, yy, img.get_pixel(xx, yy).lerp(col, cover))
 
 
 # ---------------------------------------------------------------------------
@@ -114,12 +122,11 @@ static func _shaded_ellipse(img: Image, c: Vector2, r: Vector2, tones: Array, de
 ## into a hazy horizon.
 static func _sky(img: Image, ground_row: int, bands: Array) -> void:
 	var w := img.get_width()
-	for y in ground_row:
-		var t := float(y) / ground_row
+	for y in ground_row * SS:  # a smooth gradient, one full-resolution row at a time
+		var t := float(y) / (ground_row * SS)
 		var c := _sky_at(bands, t)
 		c = c.lightened(smoothstep(0.7, 1.0, t) * 0.08)
-		for x in w:
-			img.set_pixel(x, y, c)
+		img.fill_rect(Rect2i(0, y, w, 1), c)
 
 
 static func _clouds(img: Image, width: int, ground_row: int, rng: RandomNumberGenerator, count: int,
@@ -147,15 +154,17 @@ static func _hills(img: Image, width: int, ground_row: int, rng: RandomNumberGen
 		var scale := (1.35 if layer == 0 else 1.0) * amp * D
 		var p1 := rng.randf() * TAU
 		var p2 := rng.randf() * TAU
-		for x in width:
+		for xx in width * SS:  # full-resolution columns: a smooth, anti-aliased ridge line
+			var x := (xx + 0.5) / SS
 			var h := (4.0 + 2.5 * sin(x * 0.0175 + p1) + 1.5 * sin(x * 0.055 + p2)) * scale
 			if layer == 1:
 				h *= 0.7
-			var top := ground_row - roundi(h)
-			for y in range(top, ground_row):
-				var t := float(y - top) / maxf(1.0, h)
+			var top := (ground_row - h) * SS
+			for yy in range(maxi(0, floori(top)), ground_row * SS):
+				var t := (yy - top) / maxf(1.0, h * SS)
 				var c := color.lightened(0.1 * (1.0 - t)) if t < 0.25 else color.darkened(0.08 * t)
-				_px(img, x, y, c)
+				var cover := clampf(yy + 1.0 - top, 0.0, 1.0)
+				img.set_pixel(xx, yy, img.get_pixel(xx, yy).lerp(c, cover))
 
 
 static func _buildings(img: Image, width: int, ground_row: int, rng: RandomNumberGenerator, sky: Array) -> void:
@@ -202,9 +211,9 @@ static func _ground(img: Image, width: int, height: int, ground_row: int, rng: R
 			var c := soil_a if rng.randf() < 0.7 else soil_b
 			if y == ground_row + 1:
 				c = c.darkened(0.12)  # shadow under the turf
-			img.set_pixel(x, y, c)
+			_px(img, x, y, c)
 	for x in width:
-		img.set_pixel(x, ground_row, dark if rng.randf() < 0.6 else light)
+		_px(img, x, ground_row, dark if rng.randf() < 0.6 else light)
 		if rng.randf() < chance * 1.4:
 			var blade := rng.randi_range(1, blade_max)
 			var lean := rng.randf_range(-0.35, 0.35)
