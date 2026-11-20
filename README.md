@@ -2,6 +2,17 @@
 
 A passive, observational ant-farm simulation for Android, built in Godot 4.7.2 (GDScript, Compatibility renderer, 1280x720 landscape). There is nothing to win or lose: you watch a self-sustaining colony live.
 
+**Download:** the latest APK is on the [Releases page](https://github.com/SeanShaffer88/SimAntics/releases/latest).
+
+![A mature Red Harvester Ant colony: winding galleries from three mound entrances, chambers of brood and seed stores, and creatures living in the soil](docs/screenshots/nest.jpg)
+
+| | |
+|---|---|
+| ![Zoomed in: workers carrying brood and walking on gallery walls, a ground beetle in its soil cell](docs/screenshots/closeup.jpg) | ![A heavy downpour floods the deepest chambers while the ants shelter higher up](docs/screenshots/flood.jpg) |
+| Zoomed in: workers on the walls and brood in the chambers | A long downpour floods the deepest chambers |
+| ![A wireworm, a moth pupa and a scarab grub in their soil cells, waiting to be dug into](docs/screenshots/soil_life.jpg) | |
+| Grubs, pupae and wireworms in the soil, waiting to be dug into | |
+
 ## What's in it
 
 - **Every player's colony is unique.** A seed created on first launch picks the species (Red Harvester, Big-headed, Leafcutter, Pavement or Black Garden Ant), the soil type and the nest blueprint.
