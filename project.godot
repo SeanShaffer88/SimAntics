@@ -9,6 +9,7 @@ config/name="SimAntics"
 config/description="A passive, self-sustaining side-view ant farm."
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://icon.png"
 
 [display]
 
