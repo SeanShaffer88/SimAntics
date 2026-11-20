@@ -15,6 +15,9 @@ const TrailLayerScript := preload("res://scripts/trail_layer.gd")
 const AmbienceScript := preload("res://scripts/ambience.gd")
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
 const GREET_CHECK := 0.3  # seconds between checks for ants meeting head-on
+const SaveGame := preload("res://scripts/save_game.gd")
+const AUTOSAVE_INTERVAL := 30.0
+const MIN_AWAY := 60.0  # shorter absences are not worth a catch-up message
 
 const VIEW_SIZE := Vector2(1280, 720)
 const GROUND_Y := 120.0  # where surface ants put their feet
@@ -31,6 +34,7 @@ var _trail: TrailLayerScript
 var _day_night: DayNightScript
 var _ambience: AmbienceScript
 var _greet_clock := 0.0
+var _autosave_clock := AUTOSAVE_INTERVAL
 
 @onready var _surface: SurfaceLayerScript = $SurfaceLayer
 @onready var _subterranean: SubterraneanLayerScript = $SubterraneanLayer
@@ -41,26 +45,37 @@ var _greet_clock := 0.0
 
 func _ready() -> void:
 	profile = ColonyProfile.load_or_create()
+	var saved := {} if profile.is_preview else SaveGame.read(profile.seed_value)
 	_subterranean.setup(profile, VIEW_SIZE, GROUND_Y, SOIL_TOP)
 	_surface.setup(VIEW_SIZE, GROUND_Y, SOIL_TOP, _subterranean.entrance_xs, profile.seed_value, _load_preset())
 	var range_workers: Array = profile.species["workers"]
 	colony = ColonyScript.new()
 	colony.name = "Colony"
 	add_child(colony)
-	colony.setup(_subterranean, profile.species, profile.seed_value, int(range_workers[1] * 1.5))
+	colony.setup(_subterranean, profile.species, profile.seed_value, int(range_workers[1] * 1.5),
+			saved.get("colony", {}))
 	colony.worker_emerged.connect(_on_worker_emerged)
 	_build_ambiance()
-	_spawn_colony()
+	var away := ""
+	if saved.has("ants"):
+		_restore_ants(saved)
+		away = _catch_up(saved)
+	else:
+		_spawn_colony()
 
 	_selector.setup(_surface.preset_names(), _surface.current_preset)
 	_selector.preview_requested.connect(_surface.show_preset)
 	_selector.preset_locked.connect(_save_preset)
-	_show_title()
+	_show_title(away)
 
 
 func _process(delta: float) -> void:
 	if colony != null:
 		colony.population = _worker_count()
+	_autosave_clock -= delta
+	if _autosave_clock <= 0.0:
+		_autosave_clock = AUTOSAVE_INTERVAL
+		save_colony()
 	if _ambience != null and _day_night != null:
 		_ambience.night_level = 1.0 - _day_night.daylight
 	_greet_clock -= delta
@@ -260,13 +275,96 @@ func _homes_for(role: AntScript.Role) -> Array[int]:
 	return homes
 
 
-func _show_title() -> void:
+func _show_title(away: String = "") -> void:
 	_title.text = "%s colony  ·  %s soil" % [profile.species["name"], profile.soil["name"]]
+	if away != "":
+		_title.text += "\n" + away
 	_title.modulate.a = 0.0
 	var tween := create_tween()
 	tween.tween_property(_title, "modulate:a", 1.0, 1.2)
-	tween.tween_interval(4.0)
+	tween.tween_interval(6.0 if away != "" else 4.0)
 	tween.tween_property(_title, "modulate:a", 0.0, 1.5)
+
+
+# ---------------------------------------------------------------------------
+# Saving and restoring
+# ---------------------------------------------------------------------------
+
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_WM_CLOSE_REQUEST:
+			save_colony()
+
+
+func save_colony() -> void:
+	if profile == null or profile.is_preview or colony == null:
+		return
+	var ants := []
+	for ant in _ants.get_children():
+		if not ant.is_queued_for_deletion():
+			ants.append(ant.to_save())
+	SaveGame.write({"seed": profile.seed_value, "colony": colony.to_save(), "ants": ants,
+			"time_of_day": _day_night.time_of_day, "spawned": _spawned})
+
+
+func _restore_ants(saved: Dictionary) -> void:
+	_spawn_rng.seed = profile.seed_value + 99 + int(saved.get("spawned", 0))
+	_spawned = int(saved.get("spawned", 0))
+	_day_night.time_of_day = float(saved.get("time_of_day", _day_night.time_of_day))
+	for entry: Dictionary in saved["ants"]:
+		var chamber := int(entry["chamber"])
+		if not _subterranean.chambers.has(chamber):
+			chamber = _subterranean.queen_chamber()
+		var ant := _spawn_ant(entry["caste"], int(entry["role"]), chamber, float(entry["age"]),
+				Vector2(float(entry["x"]), 0.0))
+		ant.restore_extras(float(entry.get("callow", 0.0)), bool(entry.get("departing", false)))
+
+
+## Plays out the time the app was closed. Returns a short "while you were away" line.
+func _catch_up(saved: Dictionary) -> String:
+	var away := Time.get_unix_time_from_system() - float(saved.get("saved_at", 0.0))
+	if away < MIN_AWAY:
+		return ""
+	var simulated := minf(away, ColonyScript.MAX_CATCH_UP)
+	var carers := 0
+	for ant in _ants.get_children():
+		ant.age += simulated
+		if ant.role == AntScript.Role.NURSE:
+			carers += 1
+	var report := colony.fast_forward(simulated, maxi(carers, 3))
+	var emerged := 0
+	var full := false
+	for e: Dictionary in report["emerged"]:
+		if _worker_count() >= colony.max_workers:
+			full = true  # the colony was full; older foragers left to make room
+			continue
+		var caste: Dictionary = profile.pick_caste(_spawn_rng)
+		var role := AntScript.Role.GUARD if float(caste["head"]) >= 1.5 else AntScript.Role.NURSE
+		var ant := _spawn_ant(caste, role, int(e["chamber"]), float(e["age"]))
+		if float(e["age"]) < AntScript.CALLOW_TIME:
+			ant.make_callow()
+		emerged += 1
+	_day_night.time_of_day = fmod(_day_night.time_of_day + simulated / DayNightScript.CYCLE, 1.0)
+	var parts: Array[String] = []
+	if int(report["laid"]) > 0:
+		parts.append("%d eggs laid" % int(report["laid"]))
+	var raised: int = (report["emerged"] as Array).size()
+	if raised > 0:
+		parts.append("%d new workers" % raised)
+	if full:
+		parts.append("the colony is at full size")
+	if parts.is_empty():
+		parts.append("the colony rested")
+	return "While you were away (%s): %s" % [_duration_text(away), ",  ".join(parts)]
+
+
+static func _duration_text(seconds: float) -> String:
+	var minutes := int(seconds / 60.0)
+	if minutes < 60:
+		return "%d min" % minutes
+	if minutes < 60 * 48:
+		return "%d h %d min" % [minutes / 60, minutes % 60]
+	return "%d days" % (minutes / 1440)
 
 
 func _load_preset() -> int:

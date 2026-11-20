@@ -67,7 +67,8 @@ var _waste_chamber: Dictionary = {}  # sprite instance id -> chamber id
 var _refuse: Array[Sprite2D] = []  # waste already dumped on the refuse heap
 
 
-func setup(tunnels: Tunnels, species: Dictionary, seed_value: int, worker_cap: int) -> void:
+## `saved`: this colony's state from a previous session (see to_save()), or empty for a new colony.
+func setup(tunnels: Tunnels, species: Dictionary, seed_value: int, worker_cap: int, saved: Dictionary = {}) -> void:
 	_tunnels = tunnels
 	_species = species
 	_rng.seed = seed_value + 404
@@ -75,7 +76,10 @@ func setup(tunnels: Tunnels, species: Dictionary, seed_value: int, worker_cap: i
 	_nurseries = _tunnels.chambers_with_role("nursery")
 	_pupa_rooms = _tunnels.chambers_with_role("pupae")
 	_lay_timer = _rng.randf_range(LAY_INTERVAL.x, LAY_INTERVAL.y)
-	_seed_initial_brood()
+	if saved.is_empty():
+		_seed_initial_brood()
+	else:
+		_restore(saved)
 
 
 func _seed_initial_brood() -> void:
@@ -401,11 +405,111 @@ func release(task: Dictionary) -> void:
 		(_tunnels.food_items[task["pickup_node"]] as Array).append(task["food"])
 
 
-func _leave_waste(chamber: int, at: Vector2) -> void:
-	if _rng.randf() > 0.6 or _waste.size() >= MAX_LOOSE_WASTE:
+## `always`: place it regardless of chance (used when restoring a save).
+func _leave_waste(chamber: int, at: Vector2, always: bool = false) -> void:
+	if (not always and _rng.randf() > 0.6) or _waste.size() >= MAX_LOOSE_WASTE:
 		return
 	var tex := ColonyArt.waste_bit(_species["food"], _rng.randi_range(0, 1))
 	var floor_y := _tunnels.chamber_floor_y(chamber)
 	var item := _tunnels.add_item(tex, Vector2(at.x + _rng.randf_range(-8.0, 8.0), floor_y), "waste")
 	_waste.append(item)
 	_waste_chamber[item.get_instance_id()] = chamber
+
+
+# ---------------------------------------------------------------------------
+# Saving, restoring and catching up on time away
+# ---------------------------------------------------------------------------
+
+const MAX_CATCH_UP := 8.0 * 3600.0  # never simulate more than 8 hours of absence
+const CATCH_UP_STEP := 5.0
+
+
+func to_save() -> Dictionary:
+	var saved_brood := []
+	for b in brood:
+		saved_brood.append({"stage": b.stage, "age": b.age, "duration": b.duration, "fed": b.fed,
+				"chamber": b.chamber, "zone": b.zone})
+	var waste_chambers := []
+	for item in _waste:
+		waste_chambers.append(_waste_chamber.get(item.get_instance_id(), -1))
+	var food := {}
+	for id: int in _tunnels.food_items:
+		food[str(id)] = (_tunnels.food_items[id] as Array).size()
+	return {"brood": saved_brood, "waste": waste_chambers, "food": food, "lay_timer": _lay_timer,
+			"stats": stats}
+
+
+func _restore(saved: Dictionary) -> void:
+	for entry: Dictionary in saved.get("brood", []):
+		var stage := int(entry["stage"])
+		var chamber := int(entry["chamber"])
+		var zone: String = entry["zone"]
+		if not _tunnels.chambers.has(chamber):  # the layout changed since the save
+			chamber = _nurseries[0]
+			zone = ["eggs", "larvae", "pupae"][stage]
+		var b := _add_brood(stage, chamber, zone, float(entry["age"]))
+		b.duration = float(entry["duration"])
+		b.fed = int(entry["fed"])
+		_refresh_texture(b)
+	for chamber in saved.get("waste", []):
+		if _tunnels.chambers.has(int(chamber)):
+			var c: Dictionary = _tunnels.chambers[int(chamber)]
+			_leave_waste(int(chamber), Vector2(_rng.randf_range(c["floor_left"], c["floor_right"]), 0.0), true)
+	var food: Dictionary = saved.get("food", {})
+	for key: String in food:
+		_tunnels.set_food_count(int(key), int(food[key]), _species)
+	_lay_timer = float(saved.get("lay_timer", _lay_timer))
+	stats = saved.get("stats", {})
+
+
+## Simulates `seconds` of colony life in coarse steps while the app was closed:
+## brood develops, nurses (`carers` of them) keep feeding larvae, the queen keeps
+## laying, and pupae emerge. Returns {"emerged": [{chamber, age}], "laid": int}.
+func fast_forward(seconds: float, carers: int) -> Dictionary:
+	var emerged: Array[Dictionary] = []
+	var laid := 0
+	var steps := int(minf(seconds, MAX_CATCH_UP) / CATCH_UP_STEP)
+	var feed_budget := 0.0
+	for s in steps:
+		var remaining := (steps - s) * CATCH_UP_STEP  # how long ago this step was
+		feed_budget = minf(feed_budget + carers * CATCH_UP_STEP / 35.0, 6.0)
+		for b in brood.duplicate():
+			b.age += CATCH_UP_STEP
+			match b.stage:
+				Stage.EGG:
+					if b.age >= b.duration:
+						_advance(b, Stage.LARVA)
+						_relocate(b)
+				Stage.LARVA:
+					if b.fed < FEEDS_TO_PUPATE and feed_budget >= 1.0:
+						b.fed += 1
+						feed_budget -= 1.0
+						_refresh_texture(b)
+					if b.fed >= FEEDS_TO_PUPATE and b.age >= b.duration:
+						_advance(b, Stage.PUPA)
+						_relocate(b)
+				Stage.PUPA:
+					if b.age >= b.duration:
+						brood.erase(b)
+						b.sprite.queue_free()
+						emerged.append({"chamber": b.chamber, "age": remaining})
+		_lay_timer -= CATCH_UP_STEP
+		if _lay_timer <= 0.0:
+			_lay_timer = _rng.randf_range(LAY_INTERVAL.x, LAY_INTERVAL.y)
+			if brood.size() < MAX_BROOD and _hungry_larvae() < 16:
+				# nurses would long since have carried it to a nursery
+				var nursery: int = _nurseries[_rng.randi() % _nurseries.size()]
+				_add_brood(Stage.EGG, nursery, "eggs", 0.0)
+				laid += 1
+	return {"emerged": emerged, "laid": laid}
+
+
+## Puts brood straight into the pile it belongs in (used while catching up).
+func _relocate(b: Brood) -> void:
+	if b.stage == Stage.PUPA and not _pupa_rooms.is_empty():
+		if not _pupa_rooms.has(b.chamber):
+			b.chamber = _pupa_home(-1)
+	elif not _nurseries.has(b.chamber):
+		b.chamber = _nurseries[_rng.randi() % _nurseries.size()]
+	b.zone = b.wants_zone()
+	b.sprite.position = _tunnels.zone_spot(b.chamber, b.zone).round()

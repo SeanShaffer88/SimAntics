@@ -56,6 +56,7 @@ var _frames: Array[ImageTexture] = []
 var _frame := 0
 var _frame_clock := 0.0
 var _callow_left := 0.0
+var _caste: Dictionary = {}
 var _multi_caste := false
 var _greet_left := 0.0
 var _greet_cooldown := 0.0
@@ -77,6 +78,7 @@ func setup(tunnels: Tunnels, colony: ColonyScript, species: Dictionary, caste: D
 	role = ant_role
 	age = start_age
 	caste_name = caste["name"]
+	_caste = caste
 	_multi_caste = (species["castes"] as Array).size() > 1
 	_ground_y = ground_y
 	_surface_x_range = surface_x_range
@@ -98,6 +100,29 @@ func setup(tunnels: Tunnels, colony: ColonyScript, species: Dictionary, caste: D
 	_sprite.flip_h = _facing_left
 	_start_idle()
 	_state_timer = _rng.randf_range(1.0, 10.0)  # stagger the first departures
+
+
+## This ant's state for the save file. Ants come back resting in the nearest chamber.
+func to_save() -> Dictionary:
+	var home := _current_node
+	if not _tunnels.is_chamber(home):
+		var best := INF
+		for id: int in _tunnels.chambers:
+			var d := position.distance_squared_to(_tunnels.nodes[id])
+			if d < best:
+				best = d
+				home = id
+	return {"caste": _caste, "role": role, "age": age, "callow": _callow_left, "chamber": home,
+			"x": position.x if _tunnels.is_chamber(_current_node) else _tunnels.nodes[home].x,
+			"departing": _departing}
+
+
+## Restores the callow tint and departure flag from a save.
+func restore_extras(callow_left: float, departing: bool) -> void:
+	if callow_left > 0.0:
+		make_callow()
+		_callow_left = callow_left
+	_departing = departing
 
 
 ## One line about this ant for the inspect label, e.g. "Nurse · major · 3 min old · carrying brood".

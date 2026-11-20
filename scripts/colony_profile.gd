@@ -75,13 +75,16 @@ var seed_value := 0
 var species: Dictionary
 var soil: Dictionary
 var worker_count := 0
+var is_preview := false
 
 
 ## Loads this install's colony seed, creating and saving one on first launch.
 static func load_or_create() -> RefCounted:
 	for arg in OS.get_cmdline_user_args():  # dev preview: godot -- --colony-seed=123
 		if arg.begins_with("--colony-seed="):
-			return from_seed(int(arg.get_slice("=", 1)))
+			var preview: RefCounted = from_seed(int(arg.get_slice("=", 1)))
+			preview.is_preview = true  # never read or write the player's save
+			return preview
 	var config := ConfigFile.new()
 	config.load(SETTINGS_PATH)
 	var colony_seed := int(config.get_value("colony", "seed", 0))

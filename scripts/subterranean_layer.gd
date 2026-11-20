@@ -236,6 +236,17 @@ func _furnish_chambers(profile: RefCounted) -> void:
 				_scatter(left, right, floor_y, 12, func(): return ColonyArt.prey_bit(_rng.randi_range(0, 4)))
 
 
+## Sets how much food a store holds (used when restoring a save).
+func set_food_count(id: int, count: int, species: Dictionary) -> void:
+	if not food_items.has(id):
+		return
+	var store: Array = food_items[id]
+	while store.size() > count:
+		store.pop_back().queue_free()
+	while store.size() < count:
+		store.append(add_item(food_texture(species), zone_spot(id, "food"), "food"))
+
+
 ## A texture for one unit of this species' stored food.
 func food_texture(species: Dictionary) -> Texture2D:
 	match species["food"]:
