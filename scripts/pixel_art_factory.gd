@@ -167,6 +167,29 @@ const SPEAKER_PALETTE := {
 
 static var _speaker_icons: Dictionary = {}
 
+const INFO_ROWS := [
+	"....bbbb....",
+	"..bbwwwwbb..",
+	".bwwwiiwwwb.",
+	".bwwwwwwwwb.",
+	"bwwwwiiwwwwb",
+	"bwwwwiiwwwwb",
+	"bwwwwiiwwwwb",
+	".bwwwiiwwwb.",
+	".bwwwwwwwwb.",
+	"..bbwwwwbb..",
+	"....bbbb....",
+]
+const INFO_PALETTE := {"b": Color("#b07c48"), "w": Color("#3a2618"), "i": Color("#f0dcb4")}
+static var _info_icon: ImageTexture
+
+
+## The "i" glyph for the colony info button.
+static func info_icon() -> ImageTexture:
+	if _info_icon == null:
+		_info_icon = texture_from_rows(INFO_ROWS, INFO_PALETTE)
+	return _info_icon
+
 
 ## Speaker glyph for the sound toggle, crossed out when muted.
 static func speaker_icon(muted: bool) -> ImageTexture:

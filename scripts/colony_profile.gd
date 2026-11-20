@@ -97,6 +97,16 @@ static func load_or_create() -> RefCounted:
 	return from_seed(colony_seed)
 
 
+## Replaces this install's colony seed with a fresh one (a new species, soil and nest).
+static func reset_seed() -> void:
+	var config := ConfigFile.new()
+	config.load(SETTINGS_PATH)
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	config.set_value("colony", "seed", rng.randi_range(1, 2147483646))
+	config.save(SETTINGS_PATH)
+
+
 static func from_seed(colony_seed: int) -> RefCounted:
 	var profile: RefCounted = (load("res://scripts/colony_profile.gd") as GDScript).new()
 	profile.seed_value = colony_seed

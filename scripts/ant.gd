@@ -11,7 +11,7 @@ const ColonyArt := preload("res://scripts/colony_art.gd")
 const Tunnels := preload("res://scripts/subterranean_layer.gd")
 const ColonyScript := preload("res://scripts/colony.gd")
 
-enum State { PATROL_TUNNEL, IDLE_CHAMBER, FORAGE_SURFACE, TASK, LEAVING }
+enum State { PATROL_TUNNEL, IDLE_CHAMBER, FORAGE_SURFACE, TASK, LEAVING, FLYING }
 enum Role { NURSE, WORKER, FORAGER, GUARD, ALATE }
 
 const ROLE_WEIGHTS := {
@@ -66,6 +66,9 @@ var _food_target: Node2D  # a food drop on the surface this ant is heading for
 var _harvest_left := -1.0
 var _snatched := false
 var _dig_left := -1.0  # seconds of digging left at the soil face (-1 when not digging)
+var _nuptial := false  # a winged alate heading out on its mating flight
+var _fly_velocity := Vector2.ZERO
+var _fly_clock := 0.0
 var _task: Dictionary = {}
 var _task_stage := 0
 var _carried: Sprite2D
@@ -176,7 +179,7 @@ func describe() -> String:
 
 ## Brief stop to touch antennae with a nestmate (antennation). Returns false if it can't now.
 func greet(other_pos: Vector2) -> bool:
-	if _greet_left > 0.0 or _greet_cooldown > 0.0 or state == State.LEAVING:
+	if _greet_left > 0.0 or _greet_cooldown > 0.0 or state in [State.LEAVING, State.FLYING] or _nuptial:
 		return false
 	_greet_left = _rng.randf_range(0.5, 1.1)
 	_greet_cooldown = _rng.randf_range(6.0, 14.0)
@@ -192,6 +195,42 @@ func make_callow() -> void:
 	_callow_left = CALLOW_TIME
 	_sprite.modulate = CALLOW_TINT
 	_state_timer = _rng.randf_range(8.0, 15.0)
+
+
+## A winged alate leaves on its mating flight: out of the nearest entrance and away.
+func start_nuptial_flight() -> void:
+	if role != Role.ALATE or _nuptial:
+		return
+	_nuptial = true
+	_travel_to(_tunnels.nearest_entrance(position.x))
+
+
+func _take_off() -> void:
+	state = State.FLYING
+	_path.clear()
+	position = _tunnels.nodes[_current_node] + Vector2(0.0, -_half_height)
+	_fly_velocity = Vector2(_rng.randf_range(-45.0, 45.0), _rng.randf_range(-75.0, -55.0))
+	_sprite.rotation = 0.0
+
+
+func _update_flight(delta: float) -> void:
+	_fly_clock += delta
+	# fluttering, wandering climb: wings beating fast, drifting on the breeze
+	position += (_fly_velocity + Vector2(sin(_fly_clock * 3.1) * 25.0, sin(_fly_clock * 11.0) * 18.0)) * delta
+	_fly_velocity.y = maxf(_fly_velocity.y - 12.0 * delta, -110.0)
+	if absf(_fly_velocity.x) > 0.5:
+		_facing_left = _fly_velocity.x < 0.0
+		_sprite.flip_h = _facing_left
+	_sprite.rotation = (-0.3 if _facing_left else 0.3) * signf(_fly_velocity.x)
+	_frame_clock += delta
+	if _frame_clock >= 0.05:
+		_frame_clock = 0.0
+		_frame = (_frame + 1) % _frames.size()
+		_sprite.texture = _frames[_frame]
+		_sprite.scale.y = ColonyArt.SPRITE_SCALE * (0.85 if _frame % 2 == 0 else 1.0)  # wingbeat
+	modulate = _colony.surface_tint if _colony != null else Color.WHITE
+	if position.y < -40.0 or position.x < -60.0 or position.x > 1340.0:
+		queue_free()
 
 
 ## True for a worker out on the open surface (where a bird can reach it).
@@ -260,6 +299,9 @@ func _process(delta: float) -> void:
 		State.LEAVING:
 			if _follow_path(delta):
 				queue_free()
+		State.FLYING:
+			_update_flight(delta)
+			return
 	_animate(delta)
 	if _carried != null:
 		# held in the mandibles, just ahead of the head
@@ -458,6 +500,9 @@ func _travel_to(goal: int) -> void:
 
 func _arrive() -> void:
 	_current_node = _goal_node
+	if _nuptial and _tunnels.is_entrance(_current_node):
+		_take_off()
+		return
 	if not _task.is_empty():
 		_advance_task()
 	elif _tunnels.is_entrance(_current_node):

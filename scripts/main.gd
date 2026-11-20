@@ -22,6 +22,9 @@ const MAX_FOOD_DROPS := 6
 const WeatherScript := preload("res://scripts/weather.gd")
 const SpoilHeapScript := preload("res://scripts/spoil_heap.gd")
 const FOUNDING_WORKERS := 4
+const InfoPanelScript := preload("res://scripts/info_panel.gd")
+const HISTORY_INTERVAL := 60.0  # seconds between population samples for the info graph
+const HISTORY_LENGTH := 180
 const BirdScript := preload("res://scripts/bird_event.gd")
 const AUTOSAVE_INTERVAL := 30.0
 const MIN_AWAY := 60.0  # shorter absences are not worth a catch-up message
@@ -43,6 +46,9 @@ var _ambience: AmbienceScript
 var _greet_clock := 0.0
 var _autosave_clock := AUTOSAVE_INTERVAL
 var _spoil: SpoilHeapScript
+var _founded_at := 0.0
+var _history: Array = []
+var _history_clock := 5.0
 var weather: WeatherScript
 var bird: BirdScript
 var _food_layer: Node2D
@@ -103,6 +109,10 @@ func _ready() -> void:
 	else:
 		_spawn_colony()
 
+	_founded_at = float(saved.get("founded_at", Time.get_unix_time_from_system()))
+	_history = saved.get("history", [])
+	_build_info_panel()
+
 	_selector.setup(_surface.preset_names(), _surface.current_preset)
 	_selector.preview_requested.connect(_surface.show_preset)
 	_selector.preset_locked.connect(_save_preset)
@@ -112,6 +122,12 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	if colony != null:
 		colony.population = _worker_count()
+	_history_clock -= delta
+	if _history_clock <= 0.0:
+		_history_clock = HISTORY_INTERVAL
+		_history.append(_worker_count())
+		if _history.size() > HISTORY_LENGTH:
+			_history.pop_front()
 	_autosave_clock -= delta
 	if _autosave_clock <= 0.0:
 		_autosave_clock = AUTOSAVE_INTERVAL
@@ -122,6 +138,7 @@ func _process(delta: float) -> void:
 		colony.raining = weather.raining
 		_day_night.overcast = weather.intensity
 		_ambience.rain_level = weather.intensity
+	_update_flights(delta)
 	_greet_clock -= delta
 	if _greet_clock <= 0.0:
 		_greet_clock = GREET_CHECK
@@ -184,6 +201,9 @@ func _build_ambiance() -> void:
 	add_child(weather)
 	move_child(weather, _day_night.get_index() + 1)  # rain falls in front of the sky, behind the ants
 	weather.setup(GROUND_Y, VIEW_SIZE.x, profile.seed_value)
+	weather.rain_changed.connect(func(raining: bool):
+		if not raining:  # alates swarm on the bright, still day after rain
+			get_tree().create_timer(12.0).timeout.connect(_maybe_nuptial_flight))
 
 	bird = BirdScript.new()
 	bird.name = "Bird"
@@ -302,6 +322,8 @@ func _age_for(role: AntScript.Role) -> float:
 ## A pupa has emerged: a pale callow worker joins the nurses. Once the colony is full,
 ## the oldest forager leaves on its next trip outside and does not return.
 func _on_worker_emerged(pos: Vector2, chamber: int) -> void:
+	if _try_raise_alate():
+		return  # this one emerged with wings
 	var caste: Dictionary = profile.pick_caste(_spawn_rng)
 	var role := AntScript.Role.GUARD if float(caste["head"]) >= 1.5 else AntScript.Role.NURSE
 	var ant := _spawn_ant(caste, role, chamber, 0.0, pos)
@@ -376,7 +398,8 @@ func save_colony() -> void:
 			ants.append(ant.to_save())
 	SaveGame.write({"seed": profile.seed_value, "colony": colony.to_save(), "ants": ants,
 			"time_of_day": _day_night.time_of_day, "spawned": _spawned, "food_drops": _food_save(),
-			"dig": _subterranean.dig_save(), "spoil": _spoil.to_save()})
+			"dig": _subterranean.dig_save(), "spoil": _spoil.to_save(),
+			"founded_at": _founded_at, "history": _history})
 
 
 func _restore_ants(saved: Dictionary) -> void:
@@ -530,3 +553,151 @@ func _food_save() -> Array:
 func _food_restore(saved: Dictionary) -> void:
 	for d: Dictionary in saved.get("food_drops", []):
 		_drop_food(d["kind"], float(d["x"]), int(d["crumbs"]))
+
+
+# ---------------------------------------------------------------------------
+# Colony info panel
+# ---------------------------------------------------------------------------
+
+func _build_info_panel() -> void:
+	var panel := InfoPanelScript.new()
+	panel.name = "InfoPanel"
+	panel.theme = _selector.theme
+	panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	panel.offset_top = 12.0
+	panel.offset_right = -12.0
+	$UI.add_child(panel)
+	panel.setup(_colony_stats, func() -> Array: return _history)
+	panel.new_colony_requested.connect(_start_new_colony)
+
+	var button := Button.new()
+	button.name = "InfoButton"
+	button.focus_mode = Control.FOCUS_NONE
+	button.expand_icon = true
+	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	button.tooltip_text = "Colony"
+	button.icon = PixelArt.info_icon()
+	button.theme = _selector.theme
+	button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	button.offset_left = -176.0
+	button.offset_top = -64.0
+	button.offset_right = -128.0
+	button.offset_bottom = -12.0
+	button.pressed.connect(panel.toggle)
+	$UI.add_child(button)
+
+
+## The figures shown in the info panel.
+func _colony_stats() -> Dictionary:
+	var roles := [0, 0, 0, 0]
+	var alates := 0
+	for ant in _ants.get_children():
+		if ant.role == AntScript.Role.ALATE:
+			alates += 1
+		elif ant.role < 4:
+			roles[ant.role] += 1
+	var brood := [0, 0, 0]
+	for b in colony.brood:
+		brood[b.stage] += 1
+	var food := 0
+	for id: int in _subterranean.food_items:
+		food += (_subterranean.food_items[id] as Array).size()
+	var dug := 0
+	for i in _subterranean.dug.size():
+		dug += _subterranean.dug[i]
+	var open_chambers := 0
+	for id: int in _subterranean.chambers:
+		if _subterranean.is_dug(id):
+			open_chambers += 1
+	return {
+		"title": "%s colony  ·  %s soil" % [profile.species["name"], profile.soil["name"]],
+		"age": _duration_text(Time.get_unix_time_from_system() - _founded_at + 60.0),
+		"workers": _worker_count(),
+		"alates": ("  ·  %d winged alates" % alates) if alates > 0 else "",
+		"roles": roles,
+		"brood": brood,
+		"food": food,
+		"nest": [roundi(100.0 * dug / maxi(1, _subterranean.dug.size())), open_chambers, _subterranean.chambers.size()],
+	}
+
+
+## Replaces this colony with a brand-new one (the player confirmed in the info panel).
+func _start_new_colony() -> void:
+	if not profile.is_preview:
+		ColonyProfile.reset_seed()
+		SaveGame.clear()
+	profile = null  # nothing more is saved from the old colony
+	get_tree().reload_current_scene()
+
+
+# ---------------------------------------------------------------------------
+# Alates and nuptial flights
+# ---------------------------------------------------------------------------
+
+const MAX_ALATES := 8
+const ALATE_SHARE := 0.25  # of new adults in a mature colony
+const FLIGHT_MIN_ALATES := 3
+const FLIGHT_CHECK := 300.0  # a fine day can also bring a flight without rain first
+
+var _flight_clock := FLIGHT_CHECK
+
+
+func _alate_count() -> int:
+	var n := 0
+	for ant in _ants.get_children():
+		if ant.role == AntScript.Role.ALATE:
+			n += 1
+	return n
+
+
+## A mature colony with an alate chamber raises some winged queens and males.
+func _try_raise_alate() -> bool:
+	var rooms := _subterranean.chambers_with_role("alates")
+	if rooms.is_empty() or _worker_count() < colony.max_workers * 0.8 or _alate_count() >= MAX_ALATES:
+		return false
+	if _spawn_rng.randf() >= ALATE_SHARE:
+		return false
+	var queen := _spawn_rng.randf() < 0.4
+	var caste := {"name": "alate queen", "size": 1.0, "head": 1.0, "queen": true, "wings": true} if queen \
+			else {"name": "male", "size": 0.8, "head": 0.8, "wings": true}
+	var ant := _spawn_ant(caste, AntScript.Role.ALATE, rooms[0], 0.0)
+	ant.make_callow()
+	return true
+
+
+## After rain on a bright day (or now and then on any fine day), the alates leave
+## together on their mating flight to found colonies of their own.
+func _maybe_nuptial_flight() -> void:
+	if _day_night.daylight < 0.55 or weather.raining:
+		return
+	var alates: Array[Node] = []
+	for ant in _ants.get_children():
+		if ant.role == AntScript.Role.ALATE:
+			alates.append(ant)
+	if alates.size() < FLIGHT_MIN_ALATES:
+		return
+	_announce("Nuptial flight: the winged queens and males are leaving to found new colonies")
+	var delay := 0.0
+	for ant in alates:
+		delay += _spawn_rng.randf_range(0.8, 3.0)
+		get_tree().create_timer(delay).timeout.connect(func():
+			if is_instance_valid(ant):
+				ant.start_nuptial_flight())
+
+
+func _update_flights(delta: float) -> void:
+	_flight_clock -= delta
+	if _flight_clock <= 0.0:
+		_flight_clock = FLIGHT_CHECK
+		if _alate_count() >= MAX_ALATES - 2 and _spawn_rng.randf() < 0.35:
+			_maybe_nuptial_flight()
+
+
+func _announce(text: String) -> void:
+	_title.text = text
+	_title.modulate.a = 0.0
+	var tween := create_tween()
+	tween.tween_property(_title, "modulate:a", 1.0, 0.8)
+	tween.tween_interval(5.0)
+	tween.tween_property(_title, "modulate:a", 0.0, 1.5)
