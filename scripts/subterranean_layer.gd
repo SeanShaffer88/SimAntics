@@ -43,6 +43,7 @@ var _rng := RandomNumberGenerator.new()
 var _species: Dictionary
 var _seed := 0
 var _queen_home := -1
+var _wall_noise := FastNoiseLite.new()
 
 @onready var _soil: Sprite2D = $Soil
 @onready var _items: Node2D = $Items
@@ -57,6 +58,8 @@ func setup(profile: RefCounted, view_size: Vector2, ground_y: float, soil_top: f
 	_species = profile.species
 	_seed = profile.seed_value
 
+	_wall_noise.seed = profile.seed_value
+	_wall_noise.frequency = 0.3
 	var gen := NestGenerator.new()
 	gen.generate(profile.seed_value, profile.species, view_size, ground_y, soil_top)
 	nodes = gen.nodes
@@ -288,7 +291,7 @@ func dig_save() -> Dictionary:
 	var work := {}
 	for id: int in dig_work:
 		work[str(id)] = dig_work[id]
-	return {"dug": open, "work": work}
+	return {"dug": open, "work": work, "nest": NestGenerator.VERSION}
 
 
 ## The founding chamber: the room closest to the main entrance, where the queen
@@ -337,10 +340,12 @@ func _to_art(p: Vector2) -> Vector2:
 	return Vector2(p.x / px, (p.y - _soil_top) / px)
 
 
+## Galleries are hand-dug: their width wobbles a little along their length.
 func _carve_segment(a: Vector2, b: Vector2, r: float) -> void:
 	var steps := maxi(1, ceili(a.distance_to(b) / 0.75))
 	for s in steps + 1:
-		_carve_disc(a.lerp(b, float(s) / steps), r)
+		var c := a.lerp(b, float(s) / steps)
+		_carve_disc(c, r * (0.74 + 0.42 * (_wall_noise.get_noise_2dv(c) + 1.0) * 0.5))
 
 
 func _carve_disc(c: Vector2, r: float) -> void:

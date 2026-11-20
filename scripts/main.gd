@@ -7,6 +7,7 @@ const AntScript := preload("res://scripts/ant.gd")
 const ColonyProfile := preload("res://scripts/colony_profile.gd")
 const SurfaceLayerScript := preload("res://scripts/surface_layer.gd")
 const SubterraneanLayerScript := preload("res://scripts/subterranean_layer.gd")
+const NestGenerator := preload("res://scripts/nest_generator.gd")
 const SurfaceSelectorScript := preload("res://scripts/surface_selector.gd")
 const ColonyScript := preload("res://scripts/colony.gd")
 const ObserverScript := preload("res://scripts/observer.gd")
@@ -71,6 +72,8 @@ var _observer: ObserverScript
 func _ready() -> void:
 	profile = ColonyProfile.load_or_create()
 	var saved := {} if profile.is_preview else SaveGame.read(profile.seed_value)
+	if saved.has("dig") and int(saved["dig"].get("nest", 1)) != NestGenerator.VERSION:
+		saved = _relay_nest(saved)
 	# A new colony starts from a founding queen and digs its nest out over time.
 	# Saves from before digging existed, and the --mature preview, open the whole nest.
 	var mature := OS.get_cmdline_user_args().has("--mature") or (saved.has("ants") and not saved.has("dig"))
@@ -136,6 +139,19 @@ func _ready() -> void:
 	_start_tips()
 	_apply_safe_area()
 	_show_title(away)
+
+
+## A save dug under an older nest layout: keep the colony, its ants and brood, but move
+## them into the new layout, opened in full (chamber-specific stores start empty).
+func _relay_nest(saved: Dictionary) -> Dictionary:
+	saved.erase("dig")  # with ants but no dig state the whole nest opens (see mature)
+	saved.erase("spoil")
+	var col: Dictionary = saved.get("colony", {})
+	col["food"] = {}
+	col["waste"] = []
+	for entry: Dictionary in col.get("brood", []):
+		entry["chamber"] = -1
+	return saved
 
 
 func _process(delta: float) -> void:
@@ -851,9 +867,11 @@ func _maybe_nuptial_flight() -> void:
 	var delay := 0.0
 	for ant in alates:
 		delay += _spawn_rng.randf_range(0.8, 3.0)
+		var ref: WeakRef = weakref(ant)  # the alate may be gone (a bird, a new colony) before its turn
 		get_tree().create_timer(delay).timeout.connect(func():
-			if is_instance_valid(ant):
-				ant.start_nuptial_flight())
+			var a = ref.get_ref()
+			if a != null:
+				a.start_nuptial_flight())
 
 
 func _update_flights(delta: float) -> void:

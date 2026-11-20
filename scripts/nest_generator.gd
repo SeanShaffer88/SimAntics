@@ -1,8 +1,8 @@
 extends RefCounted
 ## Builds an ant-farm nest from a seed. In a thin two-dimensional formicarium, ants dig
-## an interconnected web of galleries that spreads through the whole frame, cutting the
-## soil into irregular slabs; chambers are widened, flat-floored stretches where
-## galleries meet. Chamber roles follow what field studies show: brood in the warm
+## winding galleries down from a few entrances; side branches sprout off them and end
+## in small flat-floored chambers, and galleries that meet join into loops, so the nest
+## grows like a root system. Chamber roles follow what field studies show: brood in the warm
 ## upper-middle, the queen deep, food in the middle, refuse away from the brood (deep
 ## for leafcutters), and shallow chambers for resting foragers.
 ##
@@ -12,6 +12,8 @@ extends RefCounted
 ##   dig_faces: Array[int]  - dead-end gallery tips where the nest can keep growing
 ##   entrance_x: float
 
+## Bump when the layout algorithm changes: saves dug under another version are re-laid.
+const VERSION := 2
 const FLOOR := 0.5  # chamber floor height as a fraction of its vertical radius
 const SIDE_MARGIN := 40.0
 const BOTTOM_MARGIN := 34.0  # leaves the stony subsoil at the bottom undug
@@ -102,142 +104,273 @@ func _depth_t(y: float) -> float:
 # ---------------------------------------------------------------------------
 
 func _build(ground_y: float) -> void:
-	entrance_x = roundf(_rng.randf_range(_width * 0.25, _width * 0.75))
-	var entrance := _add_node(Vector2(entrance_x, ground_y))  # always node 0
-
-	# Per-colony character: rows of cells, and how much of each cell is hollowed out.
-	# Low fill leaves thick soil slabs with narrower galleries; high fill gives big
-	# pockets separated by thin walls.
-	var rows := _rng.randi_range(3, 4)
-	var fill := _rng.randf_range(0.5, 0.92)
-	var wall := lerpf(28.0, 12.0, fill)
-	var top := _soil_top + 20.0
-	var bottom := _soil_bottom - 6.0
-	var row_h := (bottom - top) / rows
+	_occ.clear()
 	var left := SIDE_MARGIN
 	var right := _width - SIDE_MARGIN
+	var d_range: Array = _species["depth"]
+	_max_depth = lerpf(_soil_top + 120.0, _soil_bottom - 10.0, _rng.randf_range(float(d_range[0]), float(d_range[1])))
+	_wiggle = _rng.randf_range(0.35, 0.6)  # per colony: straighter or twistier galleries
+	_branchiness = _rng.randf_range(0.6, 0.95)
 
-	# 1. Cells across every row, each hollowed into a rounded, flat-floored chamber.
-	var grid: Array[Array] = []
-	for r in rows:
-		var row_ids: Array[int] = []
-		var skipped := false
-		var x := left + _rng.randf_range(0.0, 30.0)  # stagger rows like brickwork
-		while right - x > 90.0:
-			var w := _rng.randf_range(150.0, 250.0)
-			if right - (x + w) < 110.0:
-				w = right - x  # the last cell takes what is left
-			var cell := Vector2(x + w * 0.5, top + row_h * (r + 0.5) + _rng.randf_range(-8.0, 8.0))
-			x += w
-			if not skipped and not row_ids.is_empty() and right - x > 90.0 and _rng.randf() < 0.12:
-				skipped = true
-				continue  # at most one solid block per row that the ants have not dug
-			var rx := (w - wall) * 0.5 * lerpf(0.55, 1.0, fill) * _rng.randf_range(0.88, 1.0)
-			var ry := (row_h - wall) / (1.0 + FLOOR) * lerpf(0.5, 1.0, fill) * _rng.randf_range(0.85, 1.0)
-			ry = minf(ry, rx * 0.5)  # wide, lens-shaped pockets rather than tall domes
-			# chamber spans centre - ry (roof) to centre + FLOOR * ry (floor); centre it in the cell
-			var center := Vector2(cell.x, cell.y + (1.0 - FLOOR) * 0.5 * ry)
-			var id := _add_node(center)
-			chambers[id] = _make_chamber(center, rx, ry, -1.0 if _rng.randf() < 0.5 else 1.0, true)
-			row_ids.append(id)
-		grid.append(row_ids)
-
-	# 2. Openings: to side neighbours, and down to the nearest chamber in the row below.
-	for r in grid.size():
-		var row: Array[int] = grid[r]
-		for i in row.size() - 1:
-			if _rng.randf() < 0.85:
-				_passage(row[i], row[i + 1])
-		if r + 1 < grid.size() and not grid[r + 1].is_empty():
-			for a in row:
-				if _rng.randf() < 0.55:
-					_passage(a, _nearest_by_x(grid[r + 1], nodes[a].x))
-	_connect_components()
-
-	# 3. Entrances: the main one plus 1-2 smaller openings elsewhere, each with a
-	#    foraging gallery down through the crust into the nearest top chamber.
-	entrances.append(entrance)
+	# 1. Entrances: the main one plus 1-2 others, each under its own little mound.
+	entrance_x = roundf(_rng.randf_range(_width * 0.3, _width * 0.7))
+	entrances.append(_add_node(Vector2(entrance_x, ground_y)))  # always node 0
 	entrance_xs.append(entrance_x)
 	for n in _rng.randi_range(1, 2):
 		for attempt in 20:
-			var x := roundf(_rng.randf_range(left + 60.0, right - 60.0))
+			var x := roundf(_rng.randf_range(left + 70.0, right - 70.0))
 			var clear := true
 			for other in entrance_xs:
-				if absf(other - x) < 260.0:
+				if absf(other - x) < 240.0:
 					clear = false
 			if clear:
 				entrances.append(_add_node(Vector2(x, ground_y)))
 				entrance_xs.append(x)
 				break
-	if not grid[0].is_empty():
-		for i in entrances.size():
-			var ex := entrance_xs[i]
-			var first := _nearest_by_x(grid[0], ex)
-			var drift := (nodes[first].x - ex) * 0.4
-			_chain(entrances[i], [nodes[entrances[i]], Vector2(ex, _soil_top + 8.0),
-					Vector2(ex + drift, (_soil_top + nodes[first].y) * 0.5), nodes[first]], first)
 
-	# 4. A few galleries still being dug, pushing out from chambers into solid soil.
-	var bounds := Rect2(Vector2(left + 10.0, top), Vector2(right - left - 20.0, bottom - top))
-	var all_ids: Array[int] = []
-	for row in grid:
-		all_ids.append_array(row)
-	for n in _rng.randi_range(2, 4):
-		var from: int = all_ids[_rng.randi() % all_ids.size()]
-		var dir := Vector2.from_angle(_rng.randf_range(-0.3, PI + 0.3))
-		var tip := (nodes[from] + dir * _rng.randf_range(50.0, 80.0)).clamp(bounds.position, bounds.end)
-		if tip.distance_to(nodes[from]) > 30.0:
-			var stub := _chain(from, [nodes[from], tip])
-			dig_faces.append(stub[stub.size() - 1])
+	# 2. From each entrance a main gallery winds down through the soil; branches sprout
+	#    off it sideways and end in small chambers, much as real nests grow outward and
+	#    down from their entrances. Galleries that run into another one usually join it.
+	var queue: Array[Dictionary] = []
+	for i in entrances.size():
+		var top := _chain(entrances[i], [nodes[entrances[i]], Vector2(entrance_xs[i], _soil_top + 10.0)])
+		var top_id: int = top[top.size() - 1]
+		_occupy_chain(top)
+		queue.append({"from": top_id, "dir": Vector2.DOWN, "kind": "trunk", "gen": 0,
+				"steps": int((_max_depth - nodes[top_id].y) / SEG * _rng.randf_range(0.75, 1.0))})
+	var wanted: int = int(_species["chambers"][1]) + _rng.randi_range(8, 13)
+	var guard := 0
+	while not queue.is_empty() and guard < 200:
+		guard += 1
+		_grow(queue.pop_front(), queue)
+
+	# 3. Keep branching off existing galleries until the colony has dug enough rooms.
+	var tries := 0
+	while chambers.size() < wanted and tries < 90:
+		tries += 1
+		var from := _random_gallery_node()
+		if from == -1:
+			break
+		var side := -1.0 if _rng.randf() < 0.5 else 1.0
+		_grow({"from": from, "dir": Vector2(side, _rng.randf_range(-0.15, 0.35)).normalized(), "kind": "side",
+				"gen": 2, "steps": _rng.randi_range(2, 6)}, queue)
+		while not queue.is_empty():
+			_grow(queue.pop_front(), queue)
+	_connect_components()
 
 
-## A short opening between two chambers.
-func _passage(a: int, b: int) -> void:
-	if (links[a] as Array).has(b):
-		return
-	_gallery(a, b)
+const SEG := 20.0  # px per growth step of a gallery
+const CLEAR := 22.0  # galleries keep this far apart unless they join
+const CELL := 10.0
+
+var _occ: Dictionary = {}  # Vector2i cell -> node id, for keeping galleries apart
+var _max_depth := 0.0
+var _wiggle := 0.35
+var _branchiness := 0.6
 
 
-func _nearest_by_x(ids: Array[int], x: float) -> int:
-	var best: int = ids[0]
+func _cell(p: Vector2) -> Vector2i:
+	return Vector2i(floori(p.x / CELL), floori(p.y / CELL))
+
+
+func _occupy(id: int) -> void:
+	_occ[_cell(nodes[id])] = id
+
+
+func _occupy_chain(ids: Array[int]) -> void:
 	for id in ids:
-		if absf(nodes[id].x - x) < absf(nodes[best].x - x):
-			best = id
+		_occupy(id)
+
+
+## The nearest dug node within CLEAR of p that is not in `own`, or -1.
+func _hit(p: Vector2, own: Dictionary) -> int:
+	var c := _cell(p)
+	var best := -1
+	var best_d := CLEAR
+	for dy in range(-3, 4):
+		for dx in range(-3, 4):
+			var id: int = _occ.get(c + Vector2i(dx, dy), -1)
+			if id == -1 or own.has(id):
+				continue
+			var d := nodes[id].distance_to(p)
+			if d < best_d:
+				best_d = d
+				best = id
 	return best
 
 
-## Makes sure every chamber can be reached: joins separate groups at their closest pair.
+func _random_gallery_node() -> int:
+	var keys := _occ.keys()
+	for attempt in 30:
+		var id: int = _occ[keys[_rng.randi() % keys.size()]]
+		if not chambers.has(id) and not entrances.has(id) and nodes[id].y > _soil_top + 24.0 \
+				and (links[id] as Array).size() == 2:
+			return id
+	return -1
+
+
+## Grows one gallery from an existing node, step by step, then decides how it ends.
+func _grow(g: Dictionary, queue: Array[Dictionary]) -> void:
+	var start: int = g["from"]
+	var kind: String = g["kind"]
+	var gen: int = g["gen"]
+	var heading: Vector2 = g["dir"]
+	var steps: int = g["steps"]
+	var points: Array[Vector2] = [nodes[start]]
+	var own := {start: true}
+	for n: int in links[start]:  # don't collide with the gallery we branch from
+		own[n] = true
+		for m: int in links[n]:
+			own[m] = true
+	var joined := -1
+	var p := nodes[start]
+	for i in steps:
+		heading = heading.rotated(_rng.randf_range(-_wiggle, _wiggle))
+		if kind == "trunk":  # keep heading down, wandering side to side
+			heading = heading.lerp(Vector2(heading.x * 0.6, 1.0), 0.35).normalized()
+		else:  # side branches run roughly level, sagging a little
+			var sx := signf(heading.x) if heading.x != 0.0 else 1.0
+			heading = heading.lerp(Vector2(sx, 0.12), 0.3).normalized()
+		var next := p + heading * SEG * _rng.randf_range(0.85, 1.15)
+		if next.x < SIDE_MARGIN + 10.0 or next.x > _width - SIDE_MARGIN - 10.0 \
+				or next.y < _soil_top + 14.0 or next.y > _max_depth:
+			break
+		var hit := _hit(next, own)
+		if hit == -1:
+			hit = _hit((p + next) * 0.5, own)
+		if hit != -1:
+			if not chambers.has(hit) and i > 0 and _rng.randf() < 0.75:
+				joined = hit  # broke into a neighbouring gallery: a loop
+			break
+		points.append(next)
+		p = next
+	if points.size() < 2 and joined == -1:
+		return
+	var ids := _chain(start, points)
+	if joined != -1:
+		var tail: int = ids[ids.size() - 1]
+		var extra := _chain(tail, [nodes[tail], nodes[joined]], joined)
+		ids.append_array(extra.slice(1))
+	for id in ids:
+		own[id] = true
+	_occupy_chain(ids)
+	if joined != -1:
+		return
+	var tip: int = ids[ids.size() - 1]
+
+	# side branches and forks sprouting along this gallery
+	var since := 0
+	for k in range(2, ids.size() - 2):
+		since += 1
+		if since < 4 or _rng.randf() > _branchiness * 0.55:
+			continue
+		since = 0
+		var at: int = ids[k]
+		if kind == "trunk" or gen < 4:
+			var side := -1.0 if _rng.randf() < 0.5 else 1.0
+			if kind != "trunk" and _rng.randf() < 0.45:
+				queue.append({"from": at, "dir": Vector2(_rng.randf_range(-0.4, 0.4), 1.0).normalized(),
+						"kind": "trunk", "gen": gen + 1, "steps": _rng.randi_range(3, 8)})
+			else:
+				queue.append({"from": at, "dir": Vector2(side, _rng.randf_range(-0.2, 0.3)).normalized(),
+						"kind": "side", "gen": gen + 1, "steps": _rng.randi_range(3, 11)})
+
+	# how the gallery ends: a chamber hanging below it, a chamber at its end, or a dig face
+	var roll := _rng.randf()
+	if kind == "trunk" or roll < 0.55:
+		if _hang_chamber(tip, own, kind == "trunk"):
+			return
+	elif roll < 0.85:
+		if _end_chamber(tip, heading, own):
+			return
+	dig_faces.append(tip)
+
+
+## A chamber hanging from the end of a gallery, entered through its roof.
+func _hang_chamber(tip: int, own: Dictionary, big: bool) -> bool:
+	for attempt in 3:
+		var rx := _rng.randf_range(28.0, 40.0) if big else _rng.randf_range(18.0, 30.0)
+		rx *= 1.0 - attempt * 0.2
+		var ry := minf(rx * _rng.randf_range(0.55, 0.75), 22.0)
+		var drop := _rng.randf_range(6.0, 16.0)
+		var center := nodes[tip] + Vector2(_rng.randf_range(-rx * 0.3, rx * 0.3), drop + ry)
+		if _place_chamber(tip, center, rx, ry, own):
+			return true
+	return false
+
+
+## A chamber at the end of a level gallery, entered from the side.
+func _end_chamber(tip: int, heading: Vector2, own: Dictionary) -> bool:
+	for attempt in 3:
+		var rx := _rng.randf_range(18.0, 28.0) * (1.0 - attempt * 0.2)
+		var ry := minf(rx * _rng.randf_range(0.55, 0.75), 20.0)
+		var side := signf(heading.x) if heading.x != 0.0 else 1.0
+		var center := nodes[tip] + Vector2(side * (rx * 0.7), ry * 0.3)
+		if _place_chamber(tip, center, rx, ry, own):
+			return true
+	return false
+
+
+func _place_chamber(tip: int, center: Vector2, rx: float, ry: float, own: Dictionary) -> bool:
+	center = center.round()
+	if not _fits(center, rx, ry):
+		return false
+	# no other gallery may pass through the room
+	var x := center.x - rx - 6.0
+	while x <= center.x + rx + 6.0:
+		var y := center.y - ry - 6.0
+		while y <= center.y + ry * FLOOR + 6.0:
+			var hit := _hit(Vector2(x, y), own)
+			if hit != -1 and nodes[hit].distance_to(Vector2(x, y)) < 10.0:
+				return false
+			y += CELL
+		x += CELL
+	var id := _add_node(center)
+	chambers[id] = _make_chamber(center, rx, ry, -1.0 if _rng.randf() < 0.5 else 1.0, true)
+	var path := _chain(tip, [nodes[tip], center], id)
+	_occupy_chain(path)
+	# reserve the room's footprint so later galleries steer around it
+	x = center.x - rx
+	while x <= center.x + rx:
+		var y := center.y - ry
+		while y <= center.y + ry * FLOOR:
+			if not _occ.has(_cell(Vector2(x, y))):
+				_occ[_cell(Vector2(x, y))] = id
+			y += CELL * 0.5
+		x += CELL * 0.5
+	return true
+
+
+## Makes sure every room and entrance can be reached from the main entrance: joins
+## separate networks at their closest pair of nodes.
 func _connect_components() -> void:
-	var ids: Array[int] = []
-	for id: int in chambers:
-		ids.append(id)
-	while true:
-		var seen := {ids[0]: true}
-		var queue: Array[int] = [ids[0]]
+	for guard in 8:
+		var seen := {0: true}
+		var queue: Array[int] = [0]
 		while not queue.is_empty():
 			var cur: int = queue.pop_front()
 			for nxt: int in links[cur]:
 				if not seen.has(nxt):
 					seen[nxt] = true
 					queue.append(nxt)
-		var outside: Array[int] = []
-		for id in ids:
-			if not seen.has(id):
-				outside.append(id)
-		if outside.is_empty():
+		if seen.size() == nodes.size():
 			return
 		var best_a := -1
 		var best_b := -1
 		var best_d := INF
-		for a: int in seen:
-			if not chambers.has(a):
+		for a in range(0, nodes.size(), 2):
+			if not seen.has(a) or chambers.has(a) or entrances.has(a):
 				continue
-			for b in outside:
-				var d := nodes[a].distance_to(nodes[b])
+			for b in range(1, nodes.size(), 2):
+				if seen.has(b) or chambers.has(b) or entrances.has(b):
+					continue
+				var d := nodes[a].distance_squared_to(nodes[b])
 				if d < best_d:
 					best_d = d
 					best_a = a
 					best_b = b
+		if best_a == -1:
+			return
 		_gallery(best_a, best_b)
 
 
@@ -293,7 +426,7 @@ func _fits(center: Vector2, rx: float, ry: float) -> bool:
 		return false
 	if center.y - ry < _soil_top + 12.0 or center.y + ry > _soil_bottom:
 		return false
-	var rect := Rect2(center - Vector2(rx + 20.0, ry + 16.0), Vector2(rx + 20.0, ry + 16.0) * 2.0)
+	var rect := Rect2(center - Vector2(rx + 14.0, ry + 12.0), Vector2(rx + 14.0, ry + 12.0) * 2.0)
 	for id: int in chambers:
 		var r: Vector2 = chambers[id]["radii"]
 		if rect.intersects(Rect2(nodes[id] - r, r * 2.0)):
@@ -347,7 +480,7 @@ func _assign_roles() -> void:
 	var best_score := INF
 	for id: int in free:
 		var dx := absf(nodes[id].x - _width * 0.5) / _width
-		var dy := absf(inverse_lerp(lo, hi, nodes[id].y) - 0.6)
+		var dy := absf(inverse_lerp(lo, hi, nodes[id].y) - 0.75)
 		if dx + dy < best_score:
 			best_score = dx + dy
 			queen = id
