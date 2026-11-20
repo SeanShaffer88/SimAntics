@@ -201,7 +201,14 @@ func _check_greetings() -> void:
 		for j in range(i + 1, ants.size()):
 			var b: Node2D = ants[j]
 			if a.global_position.distance_squared_to(b.global_position) < 81.0 and _spawn_rng.randf() < 0.5:
-				if a.can_allogroom() and b.can_allogroom() and _spawn_rng.randf() < 0.3:
+				# social immunity: a nestmate carrying spores is groomed clean on sight
+				var dirty: Node2D = a if a.can_be_cleaned() else (b if b.can_be_cleaned() else null)
+				var helper: Node2D = (b if dirty == a else a) if dirty != null else null
+				if dirty != null and helper.can_allogroom() and helper.spores <= 0.0 and _spawn_rng.randf() < 0.8:
+					var span := _spawn_rng.randf_range(4.0, 7.0)
+					helper.allogroom(dirty.global_position, true, span, true)
+					dirty.allogroom(helper.global_position, false, span)
+				elif a.can_allogroom() and b.can_allogroom() and _spawn_rng.randf() < 0.3:
 					var dur := _spawn_rng.randf_range(3.0, 6.0)
 					a.allogroom(b.global_position, true, dur)
 					b.allogroom(a.global_position, false, dur)
@@ -529,6 +536,7 @@ func _restore_ants(saved: Dictionary) -> void:
 				Vector2(float(entry["x"]), 0.0))
 		ant.restore_extras(float(entry.get("callow", 0.0)), bool(entry.get("departing", false)))
 		ant.lifespan = float(entry.get("lifespan", ant.lifespan))
+		ant.restore_health(float(entry.get("spores", 0.0)), bool(entry.get("sick", false)))
 
 
 ## Plays out the time the app was closed. Returns a short "while you were away" line.
@@ -1074,6 +1082,8 @@ const BEHAVIORS := {
 	"necrophoresis": ["Necrophoresis", "A worker carried a dead nestmate to the refuse pile, as ants do once a body starts to smell."],
 	"cannibalism": ["Recycling eggs", "Short of protein, a nurse fed an egg to a larva."],
 	"plugging": ["Sealing up", "Guards heaped soil into the entrance to close the nest for the night."],
+	"spore_grooming": ["Social immunity", "Nestmates groomed fungal spores off a forager before they could infect it."],
+	"self_removal": ["Leaving to die", "An infected worker walked out of the nest to die alone, protecting the colony."],
 	"drinking": ["Drinking", "A forager drank from a raindrop on the grass and carried the water home."],
 	"aphids": ["Herding aphids", "A garden ant stroked aphids with its antennae and drank their sweet honeydew."],
 	"retinue": ["Queen's retinue", "You watched an attendant grooming and feeding the queen."],

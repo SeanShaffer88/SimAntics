@@ -37,6 +37,13 @@ var role: Role = Role.WORKER
 var caste_name := ""
 var age := 0.0
 var lifespan := 3000.0  # seconds; workers live a few times longer than they took to develop
+var spores := 0.0  # fungal spores on the cuticle (0..1), picked up outside in damp weather
+var _spore_time := 0.0  # how long the spores have been on it: given time, they infect
+var _sick := false
+var _cleaning := false  # grooming spores off a nestmate
+
+const SPORE_COLOR := Color(0.78, 1.0, 0.68)
+const INFECTION_TIME := 180.0  # seconds of carrying spores before the fungus gets in
 
 var _tunnels: Tunnels
 var _colony: ColonyScript
@@ -162,7 +169,7 @@ func to_save() -> Dictionary:
 				home = id
 	return {"caste": _caste, "role": role, "age": age, "callow": _callow_left, "chamber": home,
 			"x": position.x if _tunnels.is_chamber(_current_node) else _tunnels.nodes[home].x,
-			"departing": _departing, "lifespan": lifespan}
+			"departing": _departing, "lifespan": lifespan, "spores": spores, "sick": _sick}
 
 
 ## Restores the callow tint and departure flag from a save.
@@ -194,9 +201,13 @@ func behavior_key() -> String:
 		if _carried.has_meta("cannibal"):
 			return "cannibalism"
 		return "hitchhiking" if _carried.has_meta("hitchhiker") else "carry_food"
+	if _sick:
+		return "self_removal"
 	if _greet_left > 0.0:
 		return "trophallaxis" if has_crop() else "antennation"
 	if _groom_left > 0.0:
+		if _cleaning or (_groom_mode == GROOM_RECEIVE and spores > 0.0):
+			return "spore_grooming"
 		return "grooming" if _groom_mode == GROOM_SELF else "allogrooming"
 	if _fight_left > 0.0:
 		return "skirmish"
@@ -244,6 +255,10 @@ func describe() -> String:
 		parts.append(caste_name)
 	if role != Role.ALATE:
 		parts.append("%d min old" % maxi(1, int(age / 60.0)))
+	if _sick:
+		parts.append("sick with fungus, leaving the nest")
+	elif spores > 0.0:
+		parts.append("carrying fungal spores")
 	if _callow_left > 0.0:
 		parts.append("newly emerged")
 	elif _carried != null:
@@ -303,6 +318,17 @@ func greet(other_pos: Vector2) -> bool:
 	return true
 
 
+## True when this ant carries spores and is in the nest where a nestmate can clean it.
+func can_be_cleaned() -> bool:
+	return spores > 0.05 and not _sick and _groom_left <= 0.0 and position.y > _ground_y + 8.0 \
+			and state in [State.IDLE_CHAMBER, State.PATROL_TUNNEL, State.TASK]
+
+
+func restore_health(saved_spores: float, sick: bool) -> void:
+	spores = saved_spores
+	_sick = sick
+
+
 ## True when this ant is idling in a chamber and free to groom or be groomed.
 func can_allogroom() -> bool:
 	return state == State.IDLE_CHAMBER and _path.is_empty() and not _attending and _tend_x == INF and not _on_wall \
@@ -312,7 +338,8 @@ func can_allogroom() -> bool:
 
 ## Allogrooming: one ant licks and combs a nestmate clean (spreading the colony odour and
 ## removing fungal spores); the other stands still for it.
-func allogroom(other_pos: Vector2, groomer: bool, duration: float) -> void:
+func allogroom(other_pos: Vector2, groomer: bool, duration: float, cleaning: bool = false) -> void:
+	_cleaning = cleaning and groomer
 	_groom_left = duration
 	_groom_mode = GROOM_OTHER if groomer else GROOM_RECEIVE
 	_groom_x = other_pos.x
@@ -331,8 +358,15 @@ func _update_grooming(delta: float) -> void:
 			position.x += sin(age * 2.5) * 3.0 * delta
 		GROOM_RECEIVE:  # still, legs splayed, sometimes lifting a little
 			_sprite.rotation = sin(age * 1.5) * 0.04
+			if spores > 0.0:  # nestmates lick the spores off before they can germinate
+				spores = maxf(0.0, spores - delta * 0.2)
+				if spores <= 0.0:
+					_spore_time = 0.0
+					_colony.count("groomed_clean")
+					_colony.note.emit("A forager came home dusted with fungal spores. Its nestmates groomed it clean before the fungus could take hold.", "spores_cleaned")
 	if _groom_left <= 0.0:
 		_groom_left = 0.0
+		_cleaning = false
 		_sprite.rotation = 0.0
 		_sprite.scale.y = ColonyArt.SPRITE_SCALE
 
@@ -414,6 +448,13 @@ func _process(delta: float) -> void:
 		_sprite.modulate = Color.WHITE.lerp(CALLOW_TINT, clampf(_callow_left / CALLOW_TIME, 0.0, 1.0))
 	_greet_cooldown -= delta
 	_crop_left -= delta
+	if spores > 0.0 and not _sick:
+		_spore_time += delta
+		if _spore_time > INFECTION_TIME and spores > 0.25:
+			_sick = true  # the fungus has got through its cuticle
+			_colony.count("infected")
+	_sprite.self_modulate = Color.WHITE.lerp(SPORE_COLOR, clampf(spores, 0.0, 1.0)) \
+			if not _sick else Color(0.72, 0.82, 0.62)
 	# above ground the ant shares the sky's light; underground the farm lamp is steady
 	modulate = _colony.surface_tint if _colony != null and position.y < _ground_y + 2.0 else Color.WHITE
 	if _greet_left > 0.0:
@@ -496,6 +537,13 @@ func _next_job() -> void:
 		_start_idle()  # alates shuffle about their chamber and wait
 		return
 	_update_role()
+	if _sick and not _departing and _colony != null:
+		# a sick ant shuns its nestmates and walks out to die alone, keeping the
+		# infection away from the colony (altruistic self-removal)
+		depart()
+		_colony.note.emit("A worker infected with fungus left the nest to die alone, far from its nestmates. Sick ants do this to protect the colony.", "self_removal")
+		_travel_to(_tunnels.nearest_entrance(position.x))
+		return
 	if age > lifespan and _colony != null and _tunnels.is_chamber(_current_node):
 		_die()
 		return
@@ -983,6 +1031,9 @@ func _update_surface(delta: float) -> void:
 		return
 	if _returning:
 		_returning = false
+		if _colony != null and _colony.soil_wetness > 0.3 and spores <= 0.0 and _rng.randf() < 0.08 * _colony.soil_wetness:
+			spores = _rng.randf_range(0.5, 1.0)  # damp soil is full of fungal spores
+			_colony.count("contaminated")
 		var found := _task
 		_task = {}
 		if not found.is_empty():
@@ -1196,7 +1247,7 @@ func _leave_for_good() -> void:
 ## Advances along _path; returns true once the path is empty.
 func _follow_path(delta: float) -> bool:
 	_moving = false
-	var step := _speed * delta * _warmth()  # cold-blooded: slow in the cold, brisk in the warm
+	var step := _speed * delta * _warmth() * (0.55 if _sick else 1.0)  # cold-blooded: slow in the cold
 	while step > 0.0 and not _path.is_empty():
 		var to_target := _path[0] - position
 		var dist := to_target.length()
