@@ -1,0 +1,74 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/surface_selector.gd" id="1_selector"]
+
+[node name="SurfaceSelector" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_selector")
+
+[node name="ToggleButton" type="Button" parent="."]
+layout_mode = 1
+anchors_preset = 3
+anchor_left = 1.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = -64.0
+offset_top = -64.0
+offset_right = -12.0
+offset_bottom = -12.0
+grow_horizontal = 0
+grow_vertical = 0
+tooltip_text = "Change surface"
+focus_mode = 0
+icon_alignment = 1
+expand_icon = true
+
+[node name="Picker" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -230.0
+offset_top = -64.0
+offset_right = 230.0
+offset_bottom = -12.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="Row" type="HBoxContainer" parent="Picker"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PrevButton" type="Button" parent="Picker/Row"]
+custom_minimum_size = Vector2(44, 0)
+layout_mode = 2
+focus_mode = 0
+text = "<"
+
+[node name="NameLabel" type="Label" parent="Picker/Row"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Surface"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NextButton" type="Button" parent="Picker/Row"]
+custom_minimum_size = Vector2(44, 0)
+layout_mode = 2
+focus_mode = 0
+text = ">"
+
+[node name="ConfirmButton" type="Button" parent="Picker/Row"]
+custom_minimum_size = Vector2(64, 0)
+layout_mode = 2
+focus_mode = 0
+text = "OK"

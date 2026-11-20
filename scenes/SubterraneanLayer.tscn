@@ -1,0 +1,13 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/subterranean_layer.gd" id="1_subterranean"]
+
+[node name="SubterraneanLayer" type="Node2D"]
+script = ExtResource("1_subterranean")
+
+[node name="Soil" type="Sprite2D" parent="."]
+centered = false
+
+[node name="Items" type="Node2D" parent="."]
+
+[node name="Queen" type="Sprite2D" parent="."]
