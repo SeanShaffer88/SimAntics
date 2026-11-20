@@ -8,6 +8,7 @@ const ColonyProfile := preload("res://scripts/colony_profile.gd")
 const SurfaceLayerScript := preload("res://scripts/surface_layer.gd")
 const SubterraneanLayerScript := preload("res://scripts/subterranean_layer.gd")
 const NestGenerator := preload("res://scripts/nest_generator.gd")
+const UiArt := preload("res://scripts/ui_art.gd")
 const SurfaceSelectorScript := preload("res://scripts/surface_selector.gd")
 const ColonyScript := preload("res://scripts/colony.gd")
 const ObserverScript := preload("res://scripts/observer.gd")
@@ -313,16 +314,17 @@ func _build_ambiance() -> void:
 	mute.expand_icon = true
 	mute.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	mute.tooltip_text = "Sound"
-	mute.icon = PixelArt.speaker_icon(_ambience.muted)
+	mute.icon = UiArt.speaker_icon(_ambience.muted)
+	mute.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	mute.theme = _selector.theme
 	mute.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	mute.offset_left = -120.0
-	mute.offset_top = -64.0
-	mute.offset_right = -72.0
+	mute.offset_left = -152.0  # buttons are 68 px: big enough to tap comfortably
+	mute.offset_top = -80.0
+	mute.offset_right = -84.0
 	mute.offset_bottom = -12.0
 	mute.pressed.connect(func():
 		_ambience.muted = not _ambience.muted
-		mute.icon = PixelArt.speaker_icon(_ambience.muted)
+		mute.icon = UiArt.speaker_icon(_ambience.muted)
 		_save_setting("audio", "muted", _ambience.muted))
 	$UI.add_child(mute)
 
@@ -715,12 +717,13 @@ func _build_info_panel() -> void:
 	button.expand_icon = true
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.tooltip_text = "Colony"
-	button.icon = PixelArt.info_icon()
+	button.icon = UiArt.info_icon()
+	button.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 	button.theme = _selector.theme
 	button.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	button.offset_left = -176.0
-	button.offset_top = -64.0
-	button.offset_right = -128.0
+	button.offset_left = -224.0
+	button.offset_top = -80.0
+	button.offset_right = -156.0
 	button.offset_bottom = -12.0
 	button.pressed.connect(panel.toggle)
 	$UI.add_child(button)
@@ -986,7 +989,7 @@ func _start_tips() -> void:
 	tip.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	tip.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	tip.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	tip.offset_bottom = -72.0
+	tip.offset_bottom = -88.0
 	tip.modulate.a = 0.0
 	$UI.add_child(tip)
 	var seq := create_tween()

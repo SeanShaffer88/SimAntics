@@ -5,7 +5,8 @@ extends PanelContainer
 signal tapped(kind: String)
 
 const ColonyArt := preload("res://scripts/colony_art.gd")
-const SLOT := 40.0
+const UiArt := preload("res://scripts/ui_art.gd")
+const SLOT := 57.0  # 30% bigger than before, easier to tap
 const NAMES := {"sugar": "Sugar cube", "nectar": "Nectar", "fruit": "Fruit slice",
 		"protein": "Ladybug", "seeds": "Seeds"}
 
@@ -18,12 +19,13 @@ func owns_pointer() -> bool:
 
 
 func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR  # smooth, detailed icons
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	add_child(row)
 	for kind: String in ColonyArt.FOOD_TYPES:
 		var slot := TextureRect.new()
-		slot.texture = ColonyArt.food_icon(kind)
+		slot.texture = UiArt.food_icon(kind)
 		slot.custom_minimum_size = Vector2(SLOT, SLOT)
 		slot.pivot_offset = Vector2(SLOT, SLOT) * 0.5
 		slot.expand_mode = TextureRect.EXPAND_IGNORE_SIZE

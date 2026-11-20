@@ -8,6 +8,7 @@ signal preset_locked(index: int)
 signal picker_toggled(open: bool)
 
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
+const UiArt := preload("res://scripts/ui_art.gd")
 
 const SWIPE_DISTANCE := 80.0
 const PANEL_FADE := 0.2
@@ -32,7 +33,8 @@ var _panel_tween: Tween
 
 func _ready() -> void:
 	theme = _build_theme()
-	_toggle.icon = PixelArt.surface_icon()
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	_toggle.icon = UiArt.surface_icon()
 	_toggle.pressed.connect(_on_toggle_pressed)
 	_prev.pressed.connect(_step.bind(-1))
 	_next.pressed.connect(_step.bind(1))
@@ -146,10 +148,10 @@ func _refresh_label() -> void:
 func _build_theme() -> Theme:
 	var t := Theme.new()
 	t.default_font_size = 18
-	t.set_stylebox("panel", "PanelContainer", _box(Color(0.12, 0.08, 0.05, 0.85), BORDER))
-	t.set_stylebox("normal", "Button", _box(Color(0.22, 0.14, 0.08, 0.9), Color("#8a5a2e")))
-	t.set_stylebox("hover", "Button", _box(Color(0.3, 0.2, 0.11, 0.95), BORDER))
-	t.set_stylebox("pressed", "Button", _box(Color(0.14, 0.09, 0.05, 0.95), BORDER))
+	t.set_stylebox("panel", "PanelContainer", UiArt.frame_style("panel"))
+	t.set_stylebox("normal", "Button", UiArt.frame_style("normal"))
+	t.set_stylebox("hover", "Button", UiArt.frame_style("hover"))
+	t.set_stylebox("pressed", "Button", UiArt.frame_style("pressed"))
 	t.set_stylebox("disabled", "Button", _box(Color(0.22, 0.14, 0.08, 0.5), Color("#8a5a2e")))
 	t.set_stylebox("focus", "Button", StyleBoxEmpty.new())
 	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:

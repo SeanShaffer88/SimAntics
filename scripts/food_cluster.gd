@@ -1,6 +1,7 @@
 extends Node2D
-## Food the player dropped on the surface: a SimAnt-style cluster of pixel dots that
-## shrinks as ants carry crumbs away. Each kind has a hidden pull that is never shown
+## Food the player dropped on the surface: a little heap of detailed pieces (sugar
+## grains, nectar beads, orange chunks, ladybugs, seeds...) that shrinks from the top
+## as ants carry crumbs away. Each kind has a hidden pull that is never shown
 ## on screen; players discover the colony's preferences by watching:
 ##   sugar   - strongest: found from furthest away, recruits the most nestmates
 ##   nectar  - strong, and quick to collect (ants drink it)
@@ -19,14 +20,15 @@ const KINDS := {
 	"leaves": {"pull": 0.6, "crumbs": 14, "recruits": 2, "harvest": 2.4},  # leafcutters cut pieces to carry
 	"insects": {"pull": 0.5, "crumbs": 10, "recruits": 2, "harvest": 2.0},  # natural finds for predators
 }
-const PIXEL := 2  # matches the surface art's chunky pixels
+const UiArt := preload("res://scripts/ui_art.gd")
+## Crumbs per visible piece: big pieces (a whole ladybug) stand for several crumbs.
+const CRUMBS_PER_PIECE := {"protein": 4, "insects": 2, "fruit": 2, "leaves": 1, "nectar": 1, "sugar": 1, "seeds": 1}
 
 var kind := "sugar"
 var crumbs := 0
 var max_crumbs := 0
 
-var _dots: Array[Vector3] = []  # x, y offset and palette index
-var _palette: Array[Color] = []
+var _pieces: Array[Vector3] = []  # x, y offset (bottom centre) and variant
 var _fade: Tween
 
 
@@ -37,14 +39,14 @@ func setup(food_kind: String, ground_point: Vector2, seed_value: int, crumbs_lef
 	crumbs = max_crumbs if crumbs_left < 0 else crumbs_left
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_value
-	_palette = _colors(kind)
-	# a low heap of dots, densest in the middle; two dots per crumb
-	for i in max_crumbs * 2:
+	# a low heap, densest and highest in the middle
+	var count := ceili(float(max_crumbs) / int(CRUMBS_PER_PIECE.get(kind, 1)))
+	var spread := 7.0 + count * 0.45
+	for i in count:
 		var t := rng.randf() + rng.randf() - 1.0
-		var x := roundi(t * 14.0)
-		var height := roundi((1.0 - t * t) * rng.randf_range(0.0, 5.5))
-		_dots.append(Vector3(x, -height - 1, rng.randi() % _palette.size()))
-	_dots.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.y > b.y)  # top of the heap last
+		var height := (1.0 - t * t) * rng.randf_range(0.0, 3.0 + count * 0.2)
+		_pieces.append(Vector3(roundf(t * spread), -roundf(height), rng.randi() % 3))
+	_pieces.sort_custom(func(a: Vector3, b: Vector3) -> bool: return a.y > b.y)  # top of the heap last
 	queue_redraw()
 
 
@@ -82,24 +84,9 @@ func take_crumb() -> bool:
 
 
 func _draw() -> void:
-	var visible_dots := ceili(_dots.size() * float(crumbs) / max_crumbs)
-	for i in visible_dots:
-		var d := _dots[_dots.size() - visible_dots + i]  # crumbs are taken from the top of the heap
-		draw_rect(Rect2(d.x * PIXEL, d.y * PIXEL, PIXEL, PIXEL), _palette[int(d.z)])
-
-
-static func _colors(food_kind: String) -> Array[Color]:
-	match food_kind:
-		"sugar":
-			return [Color("#ffffff"), Color("#eef2f6"), Color("#d8e0e8"), Color("#c0c8d0")]
-		"nectar":
-			return [Color("#f0b030"), Color("#ffd060"), Color("#e09018"), Color("#fff0b0")]
-		"fruit":
-			return [Color("#f07828"), Color("#e04030"), Color("#f8a040"), Color("#fff0d8"), Color("#6aa040")]
-		"protein":  # a little pile of dead ladybugs: red shells, black spots and heads
-			return [Color("#d02818"), Color("#e04030"), Color("#d02818"), Color("#201818"), Color("#ff7058")]
-		"leaves":
-			return [Color("#5a9a3a"), Color("#6aa848"), Color("#4a8a34"), Color("#8ab84a")]
-		"insects":  # natural finds: a few dead insects, browns and blacks
-			return [Color("#3a2a1a"), Color("#5a4a20"), Color("#2a2020"), Color("#6a5030")]
-	return [Color("#a07040"), Color("#c09a5a"), Color("#7a5a36"), Color("#d0b070")]
+	var shown := ceili(_pieces.size() * float(crumbs) / max_crumbs)
+	for i in shown:
+		var d := _pieces[i]  # the top of the heap goes first
+		var tex := UiArt.food_piece(kind, int(d.z))
+		var size := tex.get_size()
+		draw_texture(tex, Vector2(d.x - floorf(size.x * 0.5), d.y - size.y + 2.0))

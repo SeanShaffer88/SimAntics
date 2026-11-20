@@ -350,58 +350,6 @@ static func _cached(key: String, build: Callable) -> ImageTexture:
 const FOOD_TYPES := ["sugar", "nectar", "fruit", "protein", "seeds"]
 
 
-## A 16x16 icon for the food dock.
-static func food_icon(kind: String) -> ImageTexture:
-	return _cached("icon_" + kind, func() -> Image:
-		var img := _blank(16, 16)
-		match kind:
-			"sugar":  # a sugar cube, lit from the top left
-				for y in range(4, 13):
-					for x in range(3, 12):
-						var c := Color("#f4f6f8")
-						if x == 3 or y == 4:
-							c = Color("#ffffff")
-						elif x == 11 or y == 12:
-							c = Color("#b8c0c8")
-						elif (x + y) % 5 == 0:
-							c = Color("#dde4ea")
-						img.set_pixel(x, y, c)
-				for i in 3:  # top face
-					_line(img, Vector2(4 + i, 3 - i), Vector2(12 + i, 3 - i), Color("#ffffff"))
-					_line(img, Vector2(12 + i, 3 - i), Vector2(12 + i, 11 - i), Color("#c8d0d8"))
-			"nectar":  # a glossy droplet
-				for y in 16:
-					for x in 16:
-						var nx := (x + 0.5 - 8.0) / 5.0
-						var ny := (y + 0.5 - 10.0) / 5.0
-						var tip := y < 10 and absf(x + 0.5 - 8.0) < (y - 1.0) * 0.55
-						if nx * nx + ny * ny <= 1.0 or tip:
-							img.set_pixel(x, y, Color("#e8a020").lerp(Color("#ffd870"), clampf(1.0 - ny, 0.0, 1.0) * 0.6))
-				img.set_pixel(6, 9, Color("#fff4d0"))
-				img.set_pixel(6, 10, Color("#fff4d0"))
-			"fruit":  # an orange slice
-				for y in 16:
-					for x in 16:
-						var d := Vector2(x + 0.5 - 8.0, y + 0.5 - 13.0)
-						if y <= 13 and d.length() <= 7.5:
-							var c := Color("#f07828")
-							if d.length() > 6.5:
-								c = Color("#e85c18")
-							elif d.length() > 5.6:
-								c = Color("#fff0d8")
-							elif int(atan2(d.y, d.x) * 4.0) % 2 == 0:
-								c = Color("#f8a040")
-							img.set_pixel(x, y, c)
-			"protein":  # a dead ladybug
-				_ladybug(img, Vector2(8, 9), 6.0)
-			"seeds":
-				for s: Vector3 in [Vector3(5, 10, 0), Vector3(10, 11, 1), Vector3(8, 6, 2), Vector3(12, 6, 3)]:
-					var base: Color = [Color("#a07040"), Color("#c09a5a"), Color("#7a5a36"), Color("#d0b070")][int(s.z)]
-					_shade_ellipse(img, Vector2(s.x, s.y), Vector2(2.6, 1.8), base, base.darkened(0.45), base.lightened(0.35))
-		_darken_silhouette_edge(img)
-		return img)
-
-
 static func _ladybug(img: Image, c: Vector2, r: float) -> void:
 	_shade_ellipse(img, c, Vector2(r, r * 0.8), Color("#d02818"), Color("#701008"), Color("#ff7058"))
 	_shade_ellipse(img, c + Vector2(r * 0.95, r * 0.15), Vector2(r * 0.35, r * 0.35), Color("#201818"), Color("#000000"), Color("#606060"))
