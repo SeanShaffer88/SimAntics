@@ -3,6 +3,7 @@ extends Node2D
 ## surface presets. Changing preset cross-fades a second sprite in with a Tween.
 
 const PixelArt := preload("res://scripts/pixel_art_factory.gd")
+const SurfaceArt := preload("res://scripts/surface_art.gd")
 
 const ANT_HALF_HEIGHT := 6.0
 const FADE_TIME := 0.9
@@ -21,7 +22,7 @@ var _tween: Tween
 func setup(view_size: Vector2, ground_y: float, soil_top: float, entrance_xs: Array[float], seed_value: int,
 		start_preset: int = 0) -> void:
 	_ground_y = ground_y
-	var px := PixelArt.PIXEL_SCALE
+	var px := SurfaceArt.PIXEL_SCALE
 	var extra_cols := []
 	for x in entrance_xs.slice(1):
 		extra_cols.append(int(x / px))
@@ -29,7 +30,7 @@ func setup(view_size: Vector2, ground_y: float, soil_top: float, entrance_xs: Ar
 	for i in PixelArt.surface_preset_count():
 		var rng := RandomNumberGenerator.new()
 		rng.seed = seed_value + i * 101
-		var img := PixelArt.make_surface_image(int(view_size.x / px), int(soil_top / px), int(ground_y / px),
+		var img := SurfaceArt.make_surface_image(int(view_size.x / px), int(soil_top / px), int(ground_y / px),
 				int(entrance_xs[0] / px), rng, i, extra_cols)
 		_textures.append(ImageTexture.create_from_image(img))
 	for sprite: Sprite2D in [_backdrop, _incoming]:
