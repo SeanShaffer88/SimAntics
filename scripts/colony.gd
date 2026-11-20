@@ -27,6 +27,9 @@ const MAX_BROOD := 60
 const MAX_FOOD_PER_CHAMBER := 110
 const MAX_LOOSE_WASTE := 40
 const MAX_REFUSE_ITEMS := 60
+const RESERVE_FEED_INTERVAL := 25.0  # how often a founding queen feeds a larva from her own body
+const DIG_TIME := Vector2(1.8, 2.8)  # seconds an ant spends chewing out one pellet of soil
+const SMALL_COLONY := 10  # below this many workers the queen still feeds brood from her reserves
 
 
 class Brood:
@@ -61,33 +64,57 @@ var _tunnels: Tunnels
 var _species: Dictionary
 var _rng := RandomNumberGenerator.new()
 var _lay_timer := 0.0
-var _nurseries: Array[int] = []
-var _pupa_rooms: Array[int] = []
 var _waste: Array[Sprite2D] = []  # loose waste waiting to be hauled
 var _waste_chamber: Dictionary = {}  # sprite instance id -> chamber id
 var _refuse: Array[Sprite2D] = []  # waste already dumped on the refuse heap
+var _reserve_clock := RESERVE_FEED_INTERVAL
+var _dig_claims: Dictionary = {}  # node being dug into -> ants digging it
 
 
-## `saved`: this colony's state from a previous session (see to_save()), or empty for a new colony.
-func setup(tunnels: Tunnels, species: Dictionary, seed_value: int, worker_cap: int, saved: Dictionary = {}) -> void:
+signal soil_dumped(x: float)
+
+## `saved`: this colony's state from a previous session (see to_save()), or empty for a new
+## colony. `founding`: a brand-new colony that starts as a queen and her first brood.
+func setup(tunnels: Tunnels, species: Dictionary, seed_value: int, worker_cap: int, saved: Dictionary = {},
+		founding: bool = false) -> void:
 	_tunnels = tunnels
 	_species = species
 	_rng.seed = seed_value + 404
 	max_workers = worker_cap
-	_nurseries = _tunnels.chambers_with_role("nursery")
-	_pupa_rooms = _tunnels.chambers_with_role("pupae")
 	_lay_timer = _rng.randf_range(LAY_INTERVAL.x, LAY_INTERVAL.y)
 	if saved.is_empty():
-		_seed_initial_brood()
+		if founding:
+			_seed_founding_brood()
+		else:
+			_seed_initial_brood()
 	else:
 		_restore(saved)
+
+
+func _nursery_ids() -> Array[int]:
+	return _tunnels.chambers_with_role("nursery")
+
+
+func _pupa_room_ids() -> Array[int]:
+	return _tunnels.chambers_with_role("pupae")
+
+
+## A founding queen's first clutch, all kept beside her in the founding chamber.
+func _seed_founding_brood() -> void:
+	var home := _tunnels.queen_chamber()
+	for i in 6:
+		_add_brood(Stage.EGG, home, "queen_eggs", _rng.randf_range(0.0, EGG_TIME.x))
+	for i in 3:
+		_add_brood(Stage.LARVA, home, "larvae", _rng.randf_range(0.0, LARVA_MIN_TIME))
+	for i in 2:
+		_add_brood(Stage.PUPA, home, "pupae", _rng.randf_range(0.0, PUPA_TIME.x))
 
 
 func _seed_initial_brood() -> void:
 	var queen := _tunnels.queen_chamber()
 	for i in 8:
 		_add_brood(Stage.EGG, queen, "queen_eggs", _rng.randf_range(0.0, EGG_TIME.x))
-	for nursery in _nurseries:
+	for nursery in _nursery_ids():
 		for i in 8:
 			_add_brood(Stage.EGG, nursery, "eggs", _rng.randf_range(0.0, EGG_TIME.x))
 		for i in 7:
@@ -100,21 +127,21 @@ func _seed_initial_brood() -> void:
 
 ## Where a pupa belongs: the pupa chamber if the nest has one, otherwise its nursery.
 func _pupa_home(fallback: int) -> int:
-	if _pupa_rooms.is_empty():
+	if _pupa_room_ids().is_empty():
 		return fallback
-	return _pupa_rooms[_rng.randi() % _pupa_rooms.size()]
+	return _pupa_room_ids()[_rng.randi() % _pupa_room_ids().size()]
 
 
 func _in_brood_chamber(b: Brood) -> bool:
-	return _nurseries.has(b.chamber) or _pupa_rooms.has(b.chamber)
+	return _nursery_ids().has(b.chamber) or _pupa_room_ids().has(b.chamber)
 
 
 func _misplaced(b: Brood) -> bool:
 	if b.zone != b.wants_zone():
 		return true
 	# pupae go to their own chamber; eggs and larvae stay in the nurseries
-	if not _pupa_rooms.is_empty():
-		return _pupa_rooms.has(b.chamber) != (b.stage == Stage.PUPA)
+	if not _pupa_room_ids().is_empty():
+		return _pupa_room_ids().has(b.chamber) != (b.stage == Stage.PUPA)
 	return false
 
 
@@ -169,6 +196,11 @@ func _process(delta: float) -> void:
 				and _hungry_larvae() < 16:
 			_add_brood(Stage.EGG, _tunnels.queen_chamber(), "queen_eggs", 0.0)
 			_tunnels.queen_lay_pulse()
+
+	_reserve_clock -= delta
+	if _reserve_clock <= 0.0:
+		_reserve_clock = RESERVE_FEED_INTERVAL * (0.4 if population < SMALL_COLONY else 1.0)
+		_feed_from_reserves()
 
 	for b in brood.duplicate():
 		b.age += delta
@@ -227,7 +259,7 @@ func nurse_task() -> Dictionary:
 			by_queen.append(b)
 		elif _misplaced(b):
 			misplaced.append(b)
-		if b.stage == Stage.LARVA and b.fed < FEEDS_TO_PUPATE and _nurseries.has(b.chamber):
+		if b.stage == Stage.LARVA and b.fed < FEEDS_TO_PUPATE and _nursery_ids().has(b.chamber):
 			hungry.append(b)
 	if not by_queen.is_empty():
 		return _move_task(by_queen[0])
@@ -256,10 +288,10 @@ func _hungry_larvae() -> int:
 
 func _move_task(b: Brood) -> Dictionary:
 	var target: int
-	if b.stage == Stage.PUPA and not _pupa_rooms.is_empty():
-		target = b.chamber if _pupa_rooms.has(b.chamber) else _pupa_home(-1)
+	if b.stage == Stage.PUPA and not _pupa_room_ids().is_empty():
+		target = b.chamber if _pupa_room_ids().has(b.chamber) else _pupa_home(-1)
 	else:
-		target = b.chamber if _nurseries.has(b.chamber) else _nurseries[_rng.randi() % _nurseries.size()]
+		target = b.chamber if _nursery_ids().has(b.chamber) else _nursery_ids()[_rng.randi() % _nursery_ids().size()]
 	b.reserved = true
 	return {"type": "brood", "brood": b, "pickup_node": b.chamber, "pickup_pos": b.sprite.position,
 			"drop_node": target, "zone": b.wants_zone()}
@@ -325,6 +357,25 @@ func forage_task() -> Dictionary:
 ## the job no longer makes sense.
 func pick_up(task: Dictionary) -> Sprite2D:
 	match task["type"]:
+		"dig":
+			_release_dig(task)
+			# one pellet's worth: a gallery advances up to three nodes, a chamber widens a bit
+			var from: int = task["pickup_node"]
+			var into: int = task["dig_into"]
+			for n in 3:
+				if not _tunnels.dig(into, from) or _tunnels.is_chamber(into):
+					break
+				var next := -1
+				for c: int in _tunnels.links[into]:
+					if not _tunnels.is_dug(c) and not _dig_claims.has(c):
+						next = c
+						break
+				if next == -1:
+					break
+				from = into
+				into = next
+			count("dig_trips")
+			return _tunnels.add_item(ColonyArt.soil_pellet(_soil_color), Vector2.ZERO, "soil")
 		"brood":
 			var b: Brood = task["brood"]
 			if not brood.has(b):
@@ -345,6 +396,10 @@ func pick_up(task: Dictionary) -> Sprite2D:
 
 ## Where the carried item should be put down.
 func drop_position(task: Dictionary) -> Vector2:
+	if task["type"] == "dig":  # soil is dumped beside the entrance, building up the mound
+		var entrance := _tunnels.nodes[task["drop_node"]]
+		var side := -1.0 if _rng.randf() < 0.5 else 1.0
+		return Vector2(entrance.x + side * _rng.randf_range(16.0, 46.0), entrance.y)
 	if task["type"] == "feed":
 		var b: Brood = task["brood"]
 		return b.sprite.position
@@ -360,6 +415,9 @@ func count(key: String) -> void:
 func drop(task: Dictionary, carried: Sprite2D, at: Vector2) -> void:
 	count(task["type"] + "_done")
 	match task["type"]:
+		"dig":
+			carried.queue_free()
+			soil_dumped.emit(at.x)
 		"brood":
 			var b: Brood = task["brood"]
 			b.carried = false
@@ -383,6 +441,8 @@ func drop(task: Dictionary, carried: Sprite2D, at: Vector2) -> void:
 		"store":
 			var target: int = task["drop_node"]
 			_tunnels.place_item(carried, at)
+			if not _tunnels.food_items.has(target) and _species["food"] != "fungus":
+				_tunnels.food_items[target] = []  # the queen's chamber keeps a small store at first
 			if _tunnels.food_items.has(target):
 				var store: Array = _tunnels.food_items[target]
 				store.append(carried)
@@ -398,6 +458,8 @@ func drop(task: Dictionary, carried: Sprite2D, at: Vector2) -> void:
 
 ## Called when an ant gives up a job before collecting the item.
 func release(task: Dictionary) -> void:
+	if task.get("type") == "dig":
+		_release_dig(task)
 	if task.has("brood"):
 		var b: Brood = task["brood"]
 		b.reserved = false
@@ -446,7 +508,7 @@ func _restore(saved: Dictionary) -> void:
 		var chamber := int(entry["chamber"])
 		var zone: String = entry["zone"]
 		if not _tunnels.chambers.has(chamber):  # the layout changed since the save
-			chamber = _nurseries[0]
+			chamber = _nursery_ids()[0]
 			zone = ["eggs", "larvae", "pupae"][stage]
 		var b := _add_brood(stage, chamber, zone, float(entry["age"]))
 		b.duration = float(entry["duration"])
@@ -499,7 +561,7 @@ func fast_forward(seconds: float, carers: int) -> Dictionary:
 			_lay_timer = _rng.randf_range(LAY_INTERVAL.x, LAY_INTERVAL.y)
 			if brood.size() < MAX_BROOD and _hungry_larvae() < 16:
 				# nurses would long since have carried it to a nursery
-				var nursery: int = _nurseries[_rng.randi() % _nurseries.size()]
+				var nursery: int = _nursery_ids()[_rng.randi() % _nursery_ids().size()]
 				_add_brood(Stage.EGG, nursery, "eggs", 0.0)
 				laid += 1
 	return {"emerged": emerged, "laid": laid}
@@ -507,11 +569,11 @@ func fast_forward(seconds: float, carers: int) -> Dictionary:
 
 ## Puts brood straight into the pile it belongs in (used while catching up).
 func _relocate(b: Brood) -> void:
-	if b.stage == Stage.PUPA and not _pupa_rooms.is_empty():
-		if not _pupa_rooms.has(b.chamber):
+	if b.stage == Stage.PUPA and not _pupa_room_ids().is_empty():
+		if not _pupa_room_ids().has(b.chamber):
 			b.chamber = _pupa_home(-1)
-	elif not _nurseries.has(b.chamber):
-		b.chamber = _nurseries[_rng.randi() % _nurseries.size()]
+	elif not _nursery_ids().has(b.chamber):
+		b.chamber = _nursery_ids()[_rng.randi() % _nursery_ids().size()]
 	b.zone = b.wants_zone()
 	b.sprite.position = _tunnels.zone_spot(b.chamber, b.zone).round()
 
@@ -582,3 +644,95 @@ func crumb_task(kind: String) -> Dictionary:
 	var item := _tunnels.add_item(ColonyArt.food_crumb(kind, _rng.randi_range(0, 2)), Vector2.ZERO, "food")
 	count("crumb_" + kind)
 	return {"type": "store", "item": item, "drop_node": targets[_rng.randi() % targets.size()], "zone": "food"}
+
+
+
+# ---------------------------------------------------------------------------
+# Digging the nest out
+# ---------------------------------------------------------------------------
+
+var _soil_color := Color("#7e5432")
+
+
+func set_soil_color(c: Color) -> void:
+	_soil_color = c
+
+
+## A digging job at the edge of the dug nest, or {} if there is nothing left to dig.
+## Rooms already started are favoured, so chambers get finished.
+func dig_task() -> Dictionary:
+	var options: Array[Vector2i] = []
+	var weights: Array[float] = []
+	for edge in _tunnels.frontier():
+		var limit := 2 if _tunnels.is_chamber(edge.y) else 1
+		if int(_dig_claims.get(edge.y, 0)) >= limit:
+			continue
+		options.append(edge)
+		var w := 1.0
+		if _tunnels.is_chamber(edge.y):
+			w = 6.0 if _tunnels.dig_work.has(edge.y) else 3.0
+		weights.append(w)
+	if options.is_empty():
+		return {}
+	var total := 0.0
+	for w in weights:
+		total += w
+	var roll := _rng.randf() * total
+	var pick := options[options.size() - 1]
+	for i in options.size():
+		roll -= weights[i]
+		if roll <= 0.0:
+			pick = options[i]
+			break
+	_dig_claims[pick.y] = int(_dig_claims.get(pick.y, 0)) + 1
+	var from := _tunnels.nodes[pick.x]
+	return {"type": "dig", "pickup_node": pick.x, "pickup_pos": from, "dig_into": pick.y,
+			"dig_time": _rng.randf_range(DIG_TIME.x, DIG_TIME.y),
+			"drop_node": _tunnels.nearest_entrance(from.x)}
+
+
+func has_digging() -> bool:
+	return not _tunnels.frontier().is_empty()
+
+
+func _release_dig(task: Dictionary) -> void:
+	var id: int = task["dig_into"]
+	if _dig_claims.has(id):
+		_dig_claims[id] = int(_dig_claims[id]) - 1
+		if _dig_claims[id] <= 0:
+			_dig_claims.erase(id)
+
+
+## Founding: with no food in the nest yet, the queen feeds a larva from her own body
+## reserves (her flight muscles and fat), as claustral queens do.
+func _feed_from_reserves() -> void:
+	if population < SMALL_COLONY or not _food_source_available():
+		for b in brood:
+			if b.stage == Stage.LARVA and b.fed < FEEDS_TO_PUPATE and not b.reserved and not b.carried:
+				b.fed += 1
+				_refresh_texture(b)
+				return
+
+
+func _food_source_available() -> bool:
+	if _species["food"] == "fungus":
+		return not _tunnels.chambers_with_role("fungus").is_empty()
+	for id: int in _tunnels.food_items:
+		if not (_tunnels.food_items[id] as Array).is_empty():
+			return true
+	return false
+
+
+## Digging that happened while the app was closed: `diggers` workers each finish a
+## trip every ~40 s. Returns how many trips were made.
+func fast_forward_digging(seconds: float, diggers: int) -> int:
+	var trips := int(minf(seconds, MAX_CATCH_UP) * diggers / 40.0)
+	var done := 0
+	for i in trips:
+		var options := _tunnels.frontier()
+		if options.is_empty():
+			break
+		var edge: Vector2i = options[_rng.randi() % options.size()]
+		_tunnels.dig(edge.y, edge.x)
+		done += 1
+	return done

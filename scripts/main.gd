@@ -20,6 +20,8 @@ const FoodClusterScript := preload("res://scripts/food_cluster.gd")
 const FoodDockScript := preload("res://scripts/food_dock.gd")
 const MAX_FOOD_DROPS := 6
 const WeatherScript := preload("res://scripts/weather.gd")
+const SpoilHeapScript := preload("res://scripts/spoil_heap.gd")
+const FOUNDING_WORKERS := 4
 const BirdScript := preload("res://scripts/bird_event.gd")
 const AUTOSAVE_INTERVAL := 30.0
 const MIN_AWAY := 60.0  # shorter absences are not worth a catch-up message
@@ -40,6 +42,7 @@ var _day_night: DayNightScript
 var _ambience: AmbienceScript
 var _greet_clock := 0.0
 var _autosave_clock := AUTOSAVE_INTERVAL
+var _spoil: SpoilHeapScript
 var weather: WeatherScript
 var bird: BirdScript
 var _food_layer: Node2D
@@ -56,21 +59,47 @@ var _observer: ObserverScript
 func _ready() -> void:
 	profile = ColonyProfile.load_or_create()
 	var saved := {} if profile.is_preview else SaveGame.read(profile.seed_value)
-	_subterranean.setup(profile, VIEW_SIZE, GROUND_Y, SOIL_TOP)
-	_surface.setup(VIEW_SIZE, GROUND_Y, SOIL_TOP, _subterranean.entrance_xs, profile.seed_value, _load_preset())
+	# A new colony starts from a founding queen and digs its nest out over time.
+	# Saves from before digging existed, and the --mature preview, open the whole nest.
+	var mature := OS.get_cmdline_user_args().has("--mature") or (saved.has("ants") and not saved.has("dig"))
+	var founding := saved.is_empty() and not mature
+	_subterranean.setup(profile, VIEW_SIZE, GROUND_Y, SOIL_TOP, saved.get("dig", {}), mature)
+	# the surface art shows the main entrance; others appear (via the spoil heap) once dug
+	var drawn_entrances: Array[float] = [_subterranean.entrance_xs[0]]
+	if mature:
+		drawn_entrances = _subterranean.entrance_xs
+	_surface.setup(VIEW_SIZE, GROUND_Y, SOIL_TOP, drawn_entrances, profile.seed_value, _load_preset())
 	var range_workers: Array = profile.species["workers"]
 	colony = ColonyScript.new()
 	colony.name = "Colony"
 	add_child(colony)
 	colony.setup(_subterranean, profile.species, profile.seed_value, int(range_workers[1] * 1.5),
-			saved.get("colony", {}))
+			saved.get("colony", {}), founding)
+	colony.set_soil_color(profile.soil["strata"][1])
 	colony.worker_emerged.connect(_on_worker_emerged)
 	_build_ambiance()
+	_spoil = SpoilHeapScript.new()
+	_spoil.name = "SpoilHeap"
+	add_child(_spoil)
+	move_child(_spoil, _ants.get_index())  # on the surface, under the ants
+	_spoil.setup(GROUND_Y, profile.soil["strata"][1], profile.seed_value)
+	_spoil.restore(saved.get("spoil", {}))
+	colony.soil_dumped.connect(_spoil.add)
+	_subterranean.entrance_opened.connect(func(x: float):
+		_spoil.add_hole(x)
+		for i in 10:
+			_spoil.add(x + _spawn_rng.randf_range(-14.0, 14.0)))
+	if not mature:  # secondary openings dug in earlier sessions
+		for i in range(1, _subterranean.entrances.size()):
+			if _subterranean.is_dug(_subterranean.entrances[i]):
+				_spoil.add_hole(_subterranean.entrance_xs[i])
 	var away := ""
 	if saved.has("ants"):
 		_restore_ants(saved)
 		_food_restore(saved)
 		away = _catch_up(saved)
+	elif founding:
+		_spawn_founders()
 	else:
 		_spawn_colony()
 
@@ -218,6 +247,19 @@ func _worker_count() -> int:
 	return n
 
 
+## A new colony: the founding queen's first few workers (small "nanitics" in real
+## colonies), all in the founding chamber. Two tend the brood, two start digging.
+func _spawn_founders() -> void:
+	_spawn_rng.seed = profile.seed_value + 99
+	var home := _subterranean.queen_chamber()
+	for i in FOUNDING_WORKERS:
+		var caste: Dictionary = profile.species["castes"][0]  # the smallest caste
+		var role := AntScript.Role.NURSE if i < 2 else AntScript.Role.WORKER
+		var age := _spawn_rng.randf_range(30.0, 150.0) if role == AntScript.Role.NURSE \
+				else _spawn_rng.randf_range(AntScript.NURSE_UNTIL, AntScript.NURSE_UNTIL + 120.0)
+		_spawn_ant(caste, role, home, age)
+
+
 func _spawn_colony() -> void:
 	_spawn_rng.seed = profile.seed_value + 99
 	for i in profile.worker_count:
@@ -333,7 +375,8 @@ func save_colony() -> void:
 		if not ant.is_queued_for_deletion():
 			ants.append(ant.to_save())
 	SaveGame.write({"seed": profile.seed_value, "colony": colony.to_save(), "ants": ants,
-			"time_of_day": _day_night.time_of_day, "spawned": _spawned, "food_drops": _food_save()})
+			"time_of_day": _day_night.time_of_day, "spawned": _spawned, "food_drops": _food_save(),
+			"dig": _subterranean.dig_save(), "spoil": _spoil.to_save()})
 
 
 func _restore_ants(saved: Dictionary) -> void:
@@ -361,6 +404,13 @@ func _catch_up(saved: Dictionary) -> String:
 		if ant.role == AntScript.Role.NURSE:
 			carers += 1
 	var report := colony.fast_forward(simulated, maxi(carers, 3))
+	var diggers := 0
+	for ant in _ants.get_children():
+		if ant.role == AntScript.Role.WORKER:
+			diggers += 1
+	var dug := colony.fast_forward_digging(simulated, diggers)
+	for i in mini(dug, 400):  # their pellets are on the spoil heap
+		_spoil.add(_subterranean.entrance_xs[0] + _spawn_rng.randf_range(-46.0, 46.0))
 	var emerged := 0
 	var full := false
 	for e: Dictionary in report["emerged"]:
@@ -380,6 +430,8 @@ func _catch_up(saved: Dictionary) -> String:
 	var raised: int = (report["emerged"] as Array).size()
 	if raised > 0:
 		parts.append("%d new workers" % raised)
+	if dug > 0:
+		parts.append("the nest grew (%d digging trips)" % dug)
 	if full:
 		parts.append("the colony is at full size")
 	if parts.is_empty():

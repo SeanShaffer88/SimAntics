@@ -436,3 +436,11 @@ static func food_crumb(kind: String, variant: int) -> ImageTexture:
 				var base: Color = [Color("#a07040"), Color("#c09a5a"), Color("#7a5a36")][variant % 3]
 				_shade_ellipse(img, Vector2(2, 2.5), Vector2(1.9, 1.3), base, base.darkened(0.45), base.lightened(0.35))
 		return img)
+
+
+## A pellet of excavated soil, carried up and dropped beside the entrance.
+static func soil_pellet(soil: Color) -> ImageTexture:
+	return _cached("pellet_" + soil.to_html(false), func() -> Image:
+		var img := _blank(4, 4)
+		_shade_ellipse(img, Vector2(2, 2), Vector2(1.9, 1.7), soil, soil.darkened(0.4), soil.lightened(0.3))
+		return img)

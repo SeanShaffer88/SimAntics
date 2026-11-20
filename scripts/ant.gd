@@ -65,6 +65,7 @@ var _trail_clock := 0.0
 var _food_target: Node2D  # a food drop on the surface this ant is heading for
 var _harvest_left := -1.0
 var _snatched := false
+var _dig_left := -1.0  # seconds of digging left at the soil face (-1 when not digging)
 var _task: Dictionary = {}
 var _task_stage := 0
 var _carried: Sprite2D
@@ -154,10 +155,14 @@ func describe() -> String:
 				parts.append("carrying brood")
 			"waste":
 				parts.append("hauling waste")
+			"soil":
+				parts.append("carrying soil out")
 			_:
 				parts.append("carrying food")
 	elif _greet_left > 0.0:
 		parts.append("touching antennae")
+	elif _dig_left > 0.0:
+		parts.append("digging")
 	elif _harvest_left > 0.0:
 		parts.append("gathering food")
 	elif _food_target != null:
@@ -241,7 +246,16 @@ func _process(delta: float) -> void:
 		State.FORAGE_SURFACE:
 			_update_surface(delta)
 		State.TASK:
-			if _follow_path(delta):
+			if _dig_left > 0.0:
+				_dig_left = maxf(_dig_left - delta, 0.0)  # digging: head works at the soil
+				_frame_clock += delta
+				if _frame_clock >= 0.12:
+					_frame_clock = 0.0
+					_frame = (_frame + 1) % _frames.size()
+					_sprite.texture = _frames[_frame]
+				if _dig_left == 0.0:
+					_advance_task()
+			elif _follow_path(delta):
 				_advance_task()
 		State.LEAVING:
 			if _follow_path(delta):
@@ -294,9 +308,13 @@ func _next_job() -> void:
 			Role.NURSE:
 				if _rng.randf() < 0.8:
 					task = _colony.nurse_task()
+				if task.is_empty() and _colony.has_digging() and _rng.randf() < 0.45:
+					task = _colony.dig_task()  # nothing to tend: help dig
 			Role.WORKER, Role.FORAGER:
 				if _colony.needs_nurses() and _rng.randf() < (0.6 if role == Role.WORKER else 0.3):
 					task = _colony.nurse_task()  # pitching in with hungry brood
+				elif _colony.has_digging() and _rng.randf() < (0.6 if role == Role.WORKER else 0.2):
+					task = _colony.dig_task()  # extend the nest
 				elif role == Role.WORKER and _rng.randf() < 0.55:
 					task = _colony.waste_task()
 		if not task.is_empty():
@@ -313,11 +331,13 @@ func _choose_destination() -> int:
 		var ids: Array[int] = []
 		match key:
 			"surface":
-				ids = _tunnels.entrances.duplicate()
+				ids = _tunnels.open_entrances()
 			"entrance":
 				ids = [_tunnels.links[Tunnels.ENTRANCE][0]]  # first node down the shaft
 			"dig":
-				ids = _tunnels.dig_faces.duplicate()
+				for id in _tunnels.dig_faces:
+					if _tunnels.is_dug(id):
+						ids.append(id)
 			_:
 				ids = _tunnels.chambers_with_role(key)
 		ids.erase(_current_node)
@@ -360,8 +380,20 @@ func _advance_task() -> void:
 		0:  # in the pickup chamber: walk to the item
 			_task_stage = 1
 			state = State.TASK
-			_path.append(_stand_at(_task["pickup_pos"], _task["pickup_node"]))
+			if _task["type"] == "dig":
+				_path.append(_task["pickup_pos"])  # right up to the soil face
+			else:
+				_path.append(_stand_at(_task["pickup_pos"], _task["pickup_node"]))
 		1:  # at the item: pick it up
+			if _task["type"] == "dig" and _dig_left < 0.0:
+				_dig_left = _task["dig_time"]  # chew out a pellet first
+				var face: Vector2 = _tunnels.nodes[_task["dig_into"]] - position
+				if absf(face.x) > 0.5:
+					_facing_left = face.x < 0.0
+					_sprite.flip_h = _facing_left
+				_sprite.rotation = _angle_for(face.normalized())
+				return
+			_dig_left = -1.0
 			var item: Sprite2D = _colony.pick_up(_task)
 			if item == null:
 				_finish_task()
@@ -405,9 +437,21 @@ func _hold(item: Sprite2D) -> void:
 # ---------------------------------------------------------------------------
 
 func _travel_to(goal: int) -> void:
+	var route := _tunnels.find_path(_current_node, goal)
+	if route.is_empty() and goal != _current_node:
+		# not dug through yet: give up the job and stay where it is
+		if not _task.is_empty():
+			if _carried != null:
+				_carried.queue_free()
+				_carried = null
+			_colony.release(_task)
+			_task = {}
+		_food_target = null
+		_start_idle()
+		return
 	_goal_node = goal
 	_path.clear()
-	for id in _tunnels.find_path(_current_node, goal):
+	for id in route:
 		_path.append(_tunnels.nodes[id])
 	state = State.PATROL_TUNNEL
 
